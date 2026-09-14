@@ -8,10 +8,7 @@ import { getChallengeId } from '../../../utils/route'
 import { requireUser } from '../../../utils/session'
 
 export default defineEventHandler(async (event): Promise<CheckInResponse> => {
-  const [user] = await Promise.all([
-    requireUser(event),
-    parseBody(event, emptyMutationSchema),
-  ])
+  const [user] = await Promise.all([requireUser(event), parseBody(event, emptyMutationSchema)])
   const config = getServerConfig(event)
   return {
     challenge: await checkInToday(

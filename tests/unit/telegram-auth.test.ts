@@ -39,6 +39,8 @@ describe('проверка Telegram initData', () => {
 
   it('отклоняет устаревшие данные', () => {
     const oldAuthDate = String(Math.floor(now.valueOf() / 1000) - 3601)
-    expect(validateTelegramInitData(makeInitData({ auth_date: oldAuthDate }), token, 3600, now)).toBeNull()
+    expect(
+      validateTelegramInitData(makeInitData({ auth_date: oldAuthDate }), token, 3600, now),
+    ).toBeNull()
   })
 })

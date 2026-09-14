@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest'
-import { canJoinChallenge, canPreviewChallenge, canViewChallenge } from '../../shared/domain/permissions'
+import {
+  canJoinChallenge,
+  canManageChallenge,
+  canPreviewChallenge,
+  canViewChallenge,
+} from '../../shared/domain/permissions'
 
 const personal = { ownerId: 'owner', type: 'personal' as const }
 const group = { ownerId: 'owner', type: 'group' as const }
@@ -19,5 +24,10 @@ describe('права доступа', () => {
     expect(canJoinChallenge('stranger', personal, [])).toBe(false)
     expect(canJoinChallenge('member', group, ['member'])).toBe(false)
     expect(canJoinChallenge('stranger', group, [])).toBe(true)
+  })
+
+  it('разрешает управление только создателю', () => {
+    expect(canManageChallenge('owner', group)).toBe(true)
+    expect(canManageChallenge('member', group)).toBe(false)
   })
 })

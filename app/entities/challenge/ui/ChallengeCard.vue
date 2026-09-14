@@ -21,7 +21,10 @@ const phaseLabels = {
     </div>
     <div>
       <h2>{{ challenge.title }}</h2>
-      <p>{{ challenge.completedDays }} из {{ challenge.durationDays }} дней · серия {{ challenge.streak }}</p>
+      <p>
+        {{ challenge.completedDays }} из {{ challenge.durationDays }} дней · серия
+        {{ challenge.streak }}
+      </p>
     </div>
     <div class="progress-track" :aria-label="`Прогресс ${challenge.progress}%`">
       <span :style="{ width: `${challenge.progress}%` }" />

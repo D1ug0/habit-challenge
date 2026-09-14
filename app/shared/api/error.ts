@@ -22,7 +22,11 @@ export function getApiErrorMessage(error: unknown): string {
   if (typeof value.data?.message === 'string') {
     return value.data.message
   }
-  if (typeof value.message === 'string' && !value.message.includes('[GET]') && !value.message.includes('[POST]')) {
+  if (
+    typeof value.message === 'string' &&
+    !value.message.includes('[GET]') &&
+    !value.message.includes('[POST]')
+  ) {
     return value.message
   }
   return 'Не удалось связаться с сервером. Попробуйте ещё раз.'

@@ -24,9 +24,9 @@ const launchParamsSchema = z.object({
   start_param: z.string().max(128).optional(),
 })
 
-const challengeStartParamSchema = z.string().regex(
-  /^challenge_([0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})$/i,
-)
+const challengeStartParamSchema = z
+  .string()
+  .regex(/^challenge_([0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})$/i)
 
 function getWebApp(): TelegramWebApp | null {
   if (!import.meta.client) {
@@ -67,18 +67,16 @@ export function impactFeedback(): void {
   }
 }
 
-export async function shareChallenge(url: string, title: string): Promise<'shared' | 'copied'> {
+export function openTelegramShare(url: string, title: string): void {
+  const shareUrl = `https://t.me/share/url?url=${encodeURIComponent(url)}&text=${encodeURIComponent(title)}`
   const webApp = getWebApp()
   if (webApp?.initData && webApp.openTelegramLink && url.startsWith('https://t.me/')) {
-    webApp.openTelegramLink(`https://t.me/share/url?url=${encodeURIComponent(url)}&text=${encodeURIComponent(title)}`)
-    return 'shared'
+    webApp.openTelegramLink(shareUrl)
+  } else {
+    window.open(shareUrl, '_blank', 'noopener,noreferrer')
   }
+}
 
-  if (navigator.share) {
-    await navigator.share({ title, text: title, url })
-    return 'shared'
-  }
-
+export async function copyChallengeUrl(url: string): Promise<void> {
   await navigator.clipboard.writeText(url)
-  return 'copied'
 }

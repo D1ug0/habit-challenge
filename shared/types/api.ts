@@ -26,6 +26,7 @@ export interface ChallengeSummary {
   durationDays: number
   startDate: string
   endDate: string
+  finishedAt: string | null
   createdAt: string
   progress: number
   completedDays: number

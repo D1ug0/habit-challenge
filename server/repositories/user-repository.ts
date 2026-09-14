@@ -18,8 +18,12 @@ export function toUserDto(user: UserRecord): UserDto {
   }
 }
 
-export async function upsertTelegramUser(db: Database, input: VerifiedTelegramUser): Promise<UserRecord> {
-  const [user] = await db.insert(users)
+export async function upsertTelegramUser(
+  db: Database,
+  input: VerifiedTelegramUser,
+): Promise<UserRecord> {
+  const [user] = await db
+    .insert(users)
     .values(input)
     .onConflictDoUpdate({
       target: users.telegramId,

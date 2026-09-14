@@ -1,13 +1,19 @@
 import tailwindcss from '@tailwindcss/vite'
 import { z } from 'zod'
 
-const allowedDevHost = z.union([
-  z.literal(''),
-  z.string().trim().max(253).regex(
-    /^(?!-)(?:[a-z\d](?:[a-z\d-]{0,61}[a-z\d])?\.)*[a-z\d](?:[a-z\d-]{0,61}[a-z\d])?$/i,
-    'Некорректный hostname в NUXT_DEV_ALLOWED_HOST',
-  ),
-]).parse(process.env.NUXT_DEV_ALLOWED_HOST ?? '')
+const allowedDevHost = z
+  .union([
+    z.literal(''),
+    z
+      .string()
+      .trim()
+      .max(253)
+      .regex(
+        /^(?!-)(?:[a-z\d](?:[a-z\d-]{0,61}[a-z\d])?\.)*[a-z\d](?:[a-z\d-]{0,61}[a-z\d])?$/i,
+        'Некорректный hostname в NUXT_DEV_ALLOWED_HOST',
+      ),
+  ])
+  .parse(process.env.NUXT_DEV_ALLOWED_HOST ?? '')
 
 export default defineNuxtConfig({
   compatibilityDate: '2026-09-01',
@@ -30,7 +36,9 @@ export default defineNuxtConfig({
     authSessionSecret: process.env.AUTH_SESSION_SECRET ?? '',
     authMaxAgeSeconds: process.env.AUTH_MAX_AGE_SECONDS ?? '86400',
     public: {
-      demoMode: process.env.NUXT_PUBLIC_DEMO_MODE ?? (process.env.NODE_ENV === 'production' ? 'false' : 'true'),
+      demoMode:
+        process.env.NUXT_PUBLIC_DEMO_MODE ??
+        (process.env.NODE_ENV === 'production' ? 'false' : 'true'),
       telegramBotUsername: process.env.NUXT_PUBLIC_TELEGRAM_BOT_USERNAME ?? '',
     },
   },
@@ -42,9 +50,7 @@ export default defineNuxtConfig({
         { name: 'theme-color', content: '#f7f5ef' },
         { name: 'viewport', content: 'width=device-width, initial-scale=1, viewport-fit=cover' },
       ],
-      script: [
-        { src: 'https://telegram.org/js/telegram-web-app.js', defer: true },
-      ],
+      script: [{ src: 'https://telegram.org/js/telegram-web-app.js', defer: true }],
     },
   },
 })

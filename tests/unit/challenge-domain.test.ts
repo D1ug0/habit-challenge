@@ -40,6 +40,12 @@ describe('границы челленджа', () => {
     expect(getCurrentChallengeDay('2026-09-01', 7, '2026-08-31')).toBe(0)
     expect(getCurrentChallengeDay('2026-09-01', 7, '2026-09-20')).toBe(7)
   })
+
+  it('после досрочного завершения блокирует активную фазу', () => {
+    expect(
+      getChallengePhase('2026-09-01', 14, '2026-09-05', new Date('2026-09-05T12:00:00Z')),
+    ).toBe('completed')
+  })
 })
 
 describe('один check-in в день', () => {

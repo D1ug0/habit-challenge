@@ -17,7 +17,7 @@ export async function parseBody<T>(event: H3Event, schema: ZodType<T>): Promise<
 
   if (!result.success) {
     const issues = Object.fromEntries(
-      result.error.issues.map(issue => [issue.path.join('.') || 'body', issue.message]),
+      result.error.issues.map((issue) => [issue.path.join('.') || 'body', issue.message]),
     )
     throw createError({
       statusCode: 422,
@@ -34,15 +34,16 @@ export async function parseBody<T>(event: H3Event, schema: ZodType<T>): Promise<
 }
 
 export function isUniqueViolation(error: unknown): boolean {
-  return typeof error === 'object'
-    && error !== null
-    && 'code' in error
-    && error.code === '23505'
+  return typeof error === 'object' && error !== null && 'code' in error && error.code === '23505'
 }
 
 export function asConfigurationError(error: unknown): never {
   if (error instanceof ZodError) {
-    apiError(500, 'SERVER_CONFIGURATION_ERROR', 'Сервер не настроен. Проверьте переменные окружения.')
+    apiError(
+      500,
+      'SERVER_CONFIGURATION_ERROR',
+      'Сервер не настроен. Проверьте переменные окружения.',
+    )
   }
 
   throw error

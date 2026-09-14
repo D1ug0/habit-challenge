@@ -24,7 +24,11 @@ export function getChallengePhase(
   startDate: string,
   durationDays: number,
   today: string,
+  finishedAt: Date | null = null,
 ): ChallengePhase {
+  if (finishedAt) {
+    return 'completed'
+  }
   if (today < startDate) {
     return 'scheduled'
   }
@@ -45,7 +49,8 @@ export function getCurrentChallengeDay(
     return 0
   }
 
-  const elapsed = Math.floor((asUtcDate(today).valueOf() - asUtcDate(startDate).valueOf()) / dayMilliseconds) + 1
+  const elapsed =
+    Math.floor((asUtcDate(today).valueOf() - asUtcDate(startDate).valueOf()) / dayMilliseconds) + 1
   return Math.min(durationDays, elapsed)
 }
 
@@ -81,6 +86,8 @@ export function canCheckIn(
   checkInDates: readonly string[],
   today: string,
 ): boolean {
-  return getChallengePhase(startDate, durationDays, today) === 'active'
-    && !hasDailyCheckIn(checkInDates, today)
+  return (
+    getChallengePhase(startDate, durationDays, today) === 'active' &&
+    !hasDailyCheckIn(checkInDates, today)
+  )
 }

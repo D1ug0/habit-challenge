@@ -15,9 +15,9 @@ const loading = ref(false)
 const error = ref<string | null>(null)
 
 const label = computed(() => {
-  if (props.challenge.checkedInToday) return 'Сегодня выполнено ✓'
   if (props.challenge.phase === 'scheduled') return 'Челлендж ещё не начался'
   if (props.challenge.phase === 'completed') return 'Челлендж завершён'
+  if (props.challenge.checkedInToday) return 'Сегодня выполнено ✓'
   return 'Выполнено сегодня'
 })
 
@@ -25,10 +25,13 @@ async function checkIn(): Promise<void> {
   loading.value = true
   error.value = null
   try {
-    const response = await $fetch<CheckInResponse>(`/api/challenges/${props.challenge.id}/check-ins`, {
-      method: 'POST',
-      body: {},
-    })
+    const response = await $fetch<CheckInResponse>(
+      `/api/challenges/${props.challenge.id}/check-ins`,
+      {
+        method: 'POST',
+        body: {},
+      },
+    )
     emit('updated', response.challenge)
     impactFeedback()
   } catch (requestError: unknown) {
@@ -55,8 +58,22 @@ async function checkIn(): Promise<void> {
 </template>
 
 <style scoped>
-.check-in-action { display: grid; gap: 8px; }
-.check-in-button { width: 100%; min-height: 62px; font-size: 1rem; }
-.button-symbol { font-size: 1.35rem; }
-.action-error { margin: 0; color: var(--danger); font-size: 0.78rem; text-align: center; }
+.check-in-action {
+  display: grid;
+  gap: 8px;
+}
+.check-in-button {
+  width: 100%;
+  min-height: 62px;
+  font-size: 1rem;
+}
+.button-symbol {
+  font-size: 1.35rem;
+}
+.action-error {
+  margin: 0;
+  color: var(--danger);
+  font-size: 0.78rem;
+  text-align: center;
+}
 </style>

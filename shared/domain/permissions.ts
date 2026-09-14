@@ -9,6 +9,10 @@ export function isChallengeParticipant(userId: string, participantIds: readonly 
   return participantIds.includes(userId)
 }
 
+export function canManageChallenge(userId: string, challenge: ChallengeAccess): boolean {
+  return challenge.ownerId === userId
+}
+
 export function canViewChallenge(
   userId: string,
   challenge: ChallengeAccess,
@@ -17,7 +21,11 @@ export function canViewChallenge(
   return challenge.ownerId === userId || isChallengeParticipant(userId, participantIds)
 }
 
-export function canPreviewChallenge(userId: string, challenge: ChallengeAccess, participantIds: readonly string[]): boolean {
+export function canPreviewChallenge(
+  userId: string,
+  challenge: ChallengeAccess,
+  participantIds: readonly string[],
+): boolean {
   return challenge.type === 'group' || canViewChallenge(userId, challenge, participantIds)
 }
 
@@ -26,7 +34,9 @@ export function canJoinChallenge(
   challenge: ChallengeAccess,
   participantIds: readonly string[],
 ): boolean {
-  return challenge.type === 'group'
-    && challenge.ownerId !== userId
-    && !isChallengeParticipant(userId, participantIds)
+  return (
+    challenge.type === 'group' &&
+    challenge.ownerId !== userId &&
+    !isChallengeParticipant(userId, participantIds)
+  )
 }

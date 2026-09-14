@@ -8,6 +8,13 @@
       "when": 1789117704385,
       "tag": "0000_daily_micromax",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1789391740897,
+      "tag": "0001_fair_invisible_woman",
+      "breakpoints": true
     }
   ]
 }

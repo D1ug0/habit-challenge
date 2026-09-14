@@ -34,7 +34,11 @@ export function validateTelegramInitData(
 
   const authDate = Number(authDateValue)
   const nowSeconds = Math.floor(now.valueOf() / 1000)
-  if (!Number.isInteger(authDate) || authDate > nowSeconds + 30 || nowSeconds - authDate > maxAgeSeconds) {
+  if (
+    !Number.isInteger(authDate) ||
+    authDate > nowSeconds + 30 ||
+    nowSeconds - authDate > maxAgeSeconds
+  ) {
     return null
   }
 
@@ -48,7 +52,10 @@ export function validateTelegramInitData(
   const calculatedHash = createHmac('sha256', secretKey).update(dataCheckString).digest()
   const receivedBuffer = Buffer.from(receivedHash, 'hex')
 
-  if (receivedBuffer.length !== calculatedHash.length || !timingSafeEqual(receivedBuffer, calculatedHash)) {
+  if (
+    receivedBuffer.length !== calculatedHash.length ||
+    !timingSafeEqual(receivedBuffer, calculatedHash)
+  ) {
     return null
   }
 

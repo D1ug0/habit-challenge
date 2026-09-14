@@ -18,15 +18,18 @@ export async function createChallengeRecord(
   input: CreateChallengeInput,
 ): Promise<ChallengeRecord> {
   return db.transaction(async (transaction) => {
-    const [challenge] = await transaction.insert(challenges).values({
-      ownerId,
-      title: input.title,
-      description: input.description || null,
-      emoji: input.emoji,
-      type: input.type,
-      durationDays: input.durationDays,
-      startDate: input.startDate,
-    }).returning()
+    const [challenge] = await transaction
+      .insert(challenges)
+      .values({
+        ownerId,
+        title: input.title,
+        description: input.description || null,
+        emoji: input.emoji,
+        type: input.type,
+        durationDays: input.durationDays,
+        startDate: input.startDate,
+      })
+      .returning()
 
     if (!challenge) {
       throw new Error('Не удалось создать челлендж')
@@ -41,26 +44,63 @@ export async function createChallengeRecord(
   })
 }
 
-export async function findChallengesForUser(db: Database, userId: string): Promise<ChallengeRecord[]> {
-  const rows = await db.select({ challenge: challenges })
+export async function findChallengesForUser(
+  db: Database,
+  userId: string,
+): Promise<ChallengeRecord[]> {
+  const rows = await db
+    .select({ challenge: challenges })
     .from(challengeParticipants)
     .innerJoin(challenges, eq(challenges.id, challengeParticipants.challengeId))
     .where(eq(challengeParticipants.userId, userId))
     .orderBy(desc(challenges.createdAt))
 
-  return rows.map(row => row.challenge)
+  return rows.map((row) => row.challenge)
 }
 
-export async function findChallengeById(db: Database, challengeId: string): Promise<ChallengeRecord | null> {
-  const [challenge] = await db.select().from(challenges).where(eq(challenges.id, challengeId)).limit(1)
+export async function findChallengeById(
+  db: Database,
+  challengeId: string,
+): Promise<ChallengeRecord | null> {
+  const [challenge] = await db
+    .select()
+    .from(challenges)
+    .where(eq(challenges.id, challengeId))
+    .limit(1)
   return challenge ?? null
+}
+
+export async function finishChallengeRecord(
+  db: Database,
+  challengeId: string,
+  ownerId: string,
+): Promise<boolean> {
+  const updated = await db
+    .update(challenges)
+    .set({ finishedAt: new Date() })
+    .where(and(eq(challenges.id, challengeId), eq(challenges.ownerId, ownerId)))
+    .returning({ id: challenges.id })
+  return updated.length > 0
+}
+
+export async function deleteChallengeRecord(
+  db: Database,
+  challengeId: string,
+  ownerId: string,
+): Promise<boolean> {
+  const deleted = await db
+    .delete(challenges)
+    .where(and(eq(challenges.id, challengeId), eq(challenges.ownerId, ownerId)))
+    .returning({ id: challenges.id })
+  return deleted.length > 0
 }
 
 export async function findParticipants(
   db: Database,
   challengeId: string,
 ): Promise<ParticipantWithUser[]> {
-  return db.select({ participant: challengeParticipants, user: users })
+  return db
+    .select({ participant: challengeParticipants, user: users })
     .from(challengeParticipants)
     .innerJoin(users, eq(users.id, challengeParticipants.userId))
     .where(eq(challengeParticipants.challengeId, challengeId))
@@ -68,7 +108,8 @@ export async function findParticipants(
 }
 
 export async function countParticipants(db: Database, challengeId: string): Promise<number> {
-  const participants = await db.select({ id: challengeParticipants.id })
+  const participants = await db
+    .select({ id: challengeParticipants.id })
     .from(challengeParticipants)
     .where(eq(challengeParticipants.challengeId, challengeId))
   return participants.length
@@ -79,7 +120,9 @@ export async function findUserCheckIns(
   challengeId: string,
   userId: string,
 ): Promise<CheckInRecord[]> {
-  return db.select().from(checkIns)
+  return db
+    .select()
+    .from(checkIns)
     .where(and(eq(checkIns.challengeId, challengeId), eq(checkIns.userId, userId)))
     .orderBy(desc(checkIns.date))
 }
@@ -99,12 +142,15 @@ export async function removeCheckIn(
   userId: string,
   date: string,
 ): Promise<boolean> {
-  const deleted = await db.delete(checkIns)
-    .where(and(
-      eq(checkIns.challengeId, challengeId),
-      eq(checkIns.userId, userId),
-      eq(checkIns.date, date),
-    ))
+  const deleted = await db
+    .delete(checkIns)
+    .where(
+      and(
+        eq(checkIns.challengeId, challengeId),
+        eq(checkIns.userId, userId),
+        eq(checkIns.date, date),
+      ),
+    )
     .returning({ id: checkIns.id })
   return deleted.length > 0
 }
@@ -114,7 +160,8 @@ export async function addParticipant(
   challengeId: string,
   userId: string,
 ): Promise<boolean> {
-  const inserted = await db.insert(challengeParticipants)
+  const inserted = await db
+    .insert(challengeParticipants)
     .values({ challengeId, userId })
     .onConflictDoNothing()
     .returning({ id: challengeParticipants.id })

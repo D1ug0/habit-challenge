@@ -12,6 +12,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:e2e": "playwright test",
+    "format": "prettier --write app server shared tests \"*.ts\" \"*.mjs\" \"*.json\"",
+    "format:check": "prettier --check app server shared tests \"*.ts\" \"*.mjs\" \"*.json\"",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
     "db:studio": "drizzle-kit studio"
@@ -34,6 +36,7 @@
     "@types/pg": "8.23.1",
     "drizzle-kit": "0.31.10",
     "eslint": "10.10.0",
+    "prettier": "3.7.4",
     "typescript": "5.9.2",
     "vitest": "3.2.4",
     "vue-tsc": "3.0.6"
