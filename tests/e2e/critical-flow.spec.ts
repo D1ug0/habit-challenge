@@ -57,6 +57,12 @@ test('создатель завершает и удаляет групповой
   expect(joinResponse.status()).toBe(409)
 
   await page.getByRole('button', { name: 'Удалить челлендж' }).click()
+  const deleteDialog = page.getByRole('dialog', { name: `Удалить «${title}»?` })
+  await expect(deleteDialog).toBeVisible()
+  await expect(deleteDialog.getByRole('button', { name: 'Отмена' })).toBeFocused()
+  await page.keyboard.press('Escape')
+  await expect(deleteDialog).toBeHidden()
+  await page.getByRole('button', { name: 'Удалить челлендж' }).click()
   await page.getByRole('button', { name: 'Да, удалить' }).click()
   await expect(page).toHaveURL('http://127.0.0.1:3000/')
   const deletedResponse = await page.request.get(`/api/challenges/${challengeId}`)

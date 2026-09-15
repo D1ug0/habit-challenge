@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import type { ChallengeDetails, ChallengeDetailsResponse } from '#shared/types/api'
 import { getApiErrorMessage } from '~/shared/api/error'
+import DeleteChallengeDialog from './DeleteChallengeDialog.vue'
 
 const props = defineProps<{ challenge: ChallengeDetails }>()
 const emit = defineEmits<{
@@ -9,17 +10,18 @@ const emit = defineEmits<{
 }>()
 
 const pending = ref<'finish' | 'delete' | null>(null)
-const confirming = ref<'finish' | 'delete' | null>(null)
+const confirmingFinish = ref(false)
+const deleteDialogOpen = ref(false)
 const error = ref<string | null>(null)
 
 function cancelConfirmation(): void {
-  confirming.value = null
+  confirmingFinish.value = false
+  deleteDialogOpen.value = false
   error.value = null
 }
 
-async function applyAction(): Promise<void> {
-  if (!confirming.value || pending.value) return
-  const action = confirming.value
+async function applyAction(action: 'finish' | 'delete'): Promise<void> {
+  if (pending.value) return
   pending.value = action
   error.value = null
   try {
@@ -36,7 +38,8 @@ async function applyAction(): Promise<void> {
       await $fetch(`/api/challenges/${props.challenge.id}`, { method: 'DELETE' })
       emit('deleted')
     }
-    confirming.value = null
+    confirmingFinish.value = false
+    deleteDialogOpen.value = false
   } catch (requestError: unknown) {
     error.value = getApiErrorMessage(requestError)
   } finally {
@@ -54,40 +57,29 @@ async function applyAction(): Promise<void> {
         участников.
       </p>
     </div>
-    <div v-if="!confirming" class="actions">
+    <div v-if="!confirmingFinish" class="actions">
       <button
         v-if="challenge.phase !== 'completed'"
         type="button"
         class="button-secondary"
-        @click="confirming = 'finish'"
+        @click="confirmingFinish = true"
       >
         Завершить досрочно
       </button>
-      <button type="button" class="danger-link" @click="confirming = 'delete'">
+      <button type="button" class="danger-link" @click="deleteDialogOpen = true">
         Удалить челлендж
       </button>
     </div>
-    <div
-      v-else
-      class="confirm"
-      role="group"
-      :aria-label="confirming === 'finish' ? 'Подтвердить завершение' : 'Подтвердить удаление'"
-    >
-      <p>
-        {{
-          confirming === 'finish'
-            ? 'Завершить сейчас? Новые отметки и вступления станут недоступны.'
-            : 'Удалить навсегда? Все отметки участников будут потеряны.'
-        }}
-      </p>
+    <div v-else class="confirm" role="group" aria-label="Подтвердить завершение">
+      <p>Завершить сейчас? Новые отметки и вступления станут недоступны.</p>
       <div class="actions">
         <button
           type="button"
-          :class="confirming === 'delete' ? 'danger-button' : 'button-secondary'"
+          class="button-secondary"
           :disabled="pending !== null"
-          @click="applyAction"
+          @click="applyAction('finish')"
         >
-          {{ pending ? 'Подождите…' : confirming === 'finish' ? 'Да, завершить' : 'Да, удалить' }}
+          {{ pending ? 'Подождите…' : 'Да, завершить' }}
         </button>
         <button
           type="button"
@@ -99,8 +91,17 @@ async function applyAction(): Promise<void> {
         </button>
       </div>
     </div>
-    <p v-if="error" class="action-error" role="alert">{{ error }}</p>
+    <p v-if="error && !deleteDialogOpen" class="action-error" role="alert">{{ error }}</p>
   </section>
+
+  <DeleteChallengeDialog
+    :open="deleteDialogOpen"
+    :challenge-title="challenge.title"
+    :pending="pending === 'delete'"
+    :error="deleteDialogOpen ? error : null"
+    @cancel="cancelConfirmation"
+    @confirm="applyAction('delete')"
+  />
 </template>
 
 <style scoped>
@@ -141,16 +142,7 @@ async function applyAction(): Promise<void> {
 .cancel-link {
   color: var(--muted);
 }
-.danger-button {
-  border: 0;
-  border-radius: 12px;
-  padding: 10px 16px;
-  color: white;
-  background: #a63932;
-  font-weight: 750;
-  cursor: pointer;
-}
 .action-error {
-  color: #a63932 !important;
+  color: var(--danger) !important;
 }
 </style>
