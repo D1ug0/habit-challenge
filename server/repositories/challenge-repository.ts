@@ -167,3 +167,27 @@ export async function addParticipant(
     .returning({ id: challengeParticipants.id })
   return inserted.length > 0
 }
+
+export async function removeParticipantAndCheckIns(
+  db: Database,
+  challengeId: string,
+  userId: string,
+): Promise<boolean> {
+  return db.transaction(async (transaction) => {
+    await transaction
+      .delete(checkIns)
+      .where(and(eq(checkIns.challengeId, challengeId), eq(checkIns.userId, userId)))
+
+    const deletedParticipants = await transaction
+      .delete(challengeParticipants)
+      .where(
+        and(
+          eq(challengeParticipants.challengeId, challengeId),
+          eq(challengeParticipants.userId, userId),
+        ),
+      )
+      .returning({ id: challengeParticipants.id })
+
+    return deletedParticipants.length > 0
+  })
+}

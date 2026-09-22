@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   canJoinChallenge,
+  canLeaveChallenge,
   canManageChallenge,
   canPreviewChallenge,
   canViewChallenge,
@@ -29,5 +30,12 @@ describe('права доступа', () => {
   it('разрешает управление только создателю', () => {
     expect(canManageChallenge('owner', group)).toBe(true)
     expect(canManageChallenge('member', group)).toBe(false)
+  })
+
+  it('разрешает выйти только участнику группового челленджа', () => {
+    expect(canLeaveChallenge('member', group, ['member'])).toBe(true)
+    expect(canLeaveChallenge('owner', group, ['owner'])).toBe(false)
+    expect(canLeaveChallenge('stranger', group, ['member'])).toBe(false)
+    expect(canLeaveChallenge('member', personal, ['member'])).toBe(false)
   })
 })

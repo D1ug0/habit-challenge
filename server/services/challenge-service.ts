@@ -16,6 +16,7 @@ import {
 } from '#shared/domain/challenge'
 import {
   canJoinChallenge,
+  canLeaveChallenge,
   canManageChallenge,
   canPreviewChallenge,
   canViewChallenge,
@@ -33,6 +34,7 @@ import {
   finishChallengeRecord,
   insertCheckIn,
   removeCheckIn,
+  removeParticipantAndCheckIns,
 } from '../repositories/challenge-repository'
 import type {
   ChallengeRecord,
@@ -305,6 +307,45 @@ export async function joinChallenge(
   return {
     challenge: await getChallengeDetails(db, challengeId, currentUser, botUsername),
     joined,
+  }
+}
+
+export async function leaveChallenge(
+  db: Database,
+  challengeId: string,
+  currentUser: UserDto,
+): Promise<void> {
+  const challenge = await findChallengeById(db, challengeId)
+  if (!challenge) {
+    apiError(404, 'CHALLENGE_NOT_FOUND', 'Челлендж не найден')
+  }
+
+  const participants = await findParticipants(db, challengeId)
+  const participantIds = participants.map((row) => row.user.id)
+
+  if (challenge.type !== 'group') {
+    apiError(403, 'PERSONAL_CHALLENGE', 'Из личного челленджа нельзя выйти')
+  }
+  if (challenge.ownerId === currentUser.id) {
+    apiError(403, 'OWNER_CANNOT_LEAVE', 'Создатель не может покинуть свой челлендж')
+  }
+  if (!canLeaveChallenge(currentUser.id, challenge, participantIds)) {
+    apiError(403, 'NOT_A_PARTICIPANT', 'Вы не участвуете в этом челлендже')
+  }
+  if (
+    getChallengePhase(
+      challenge.startDate,
+      challenge.durationDays,
+      getTodayUtc(),
+      challenge.finishedAt,
+    ) === 'completed'
+  ) {
+    apiError(409, 'CHALLENGE_COMPLETED', 'Завершённый челлендж нельзя покинуть')
+  }
+
+  const removed = await removeParticipantAndCheckIns(db, challengeId, currentUser.id)
+  if (!removed) {
+    apiError(409, 'PARTICIPANT_ALREADY_LEFT', 'Вы уже покинули этот челлендж')
   }
 }
 

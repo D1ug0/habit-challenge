@@ -40,3 +40,15 @@ export function canJoinChallenge(
     !isChallengeParticipant(userId, participantIds)
   )
 }
+
+export function canLeaveChallenge(
+  userId: string,
+  challenge: ChallengeAccess,
+  participantIds: readonly string[],
+): boolean {
+  return (
+    challenge.type === 'group' &&
+    challenge.ownerId !== userId &&
+    isChallengeParticipant(userId, participantIds)
+  )
+}

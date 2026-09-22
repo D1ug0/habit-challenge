@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import type { ChallengeDetails, ChallengeDetailsResponse } from '#shared/types/api'
 import CheckInButton from '~/features/check-in/ui/CheckInButton.vue'
+import LeaveChallengeAction from '~/features/leave-challenge/ui/LeaveChallengeAction.vue'
 import ManageChallengeActions from '~/features/manage-challenge/ui/ManageChallengeActions.vue'
 import ShareChallengeButton from '~/features/share-challenge/ui/ShareChallengeButton.vue'
 import { getApiErrorMessage } from '~/shared/api/error'
@@ -162,6 +163,14 @@ watch(
         :challenge="challenge"
         @updated="challenge = $event"
         @deleted="navigateTo('/')"
+      />
+      <LeaveChallengeAction
+        v-else-if="
+          challenge.type === 'group' && challenge.isParticipant && challenge.phase !== 'completed'
+        "
+        :challenge-id="challenge.id"
+        :challenge-title="challenge.title"
+        @left="navigateTo('/')"
       />
     </template>
   </section>

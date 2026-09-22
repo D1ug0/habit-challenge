@@ -76,6 +76,10 @@ export interface JoinChallengeResponse {
   joined: boolean
 }
 
+export interface LeaveChallengeResponse {
+  left: true
+}
+
 export interface ApiErrorData {
   code: string
   message: string

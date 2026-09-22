@@ -65,6 +65,11 @@ test('создатель завершает и удаляет групповой
   await expect(page.getByRole('heading', { name: title })).toBeVisible()
   const challengeId = new URL(page.url()).pathname.split('/').at(-1)
 
+  const ownerLeaveResponse = await page.request.delete(
+    `/api/challenges/${challengeId}/participants/me`,
+  )
+  expect(ownerLeaveResponse.status()).toBe(403)
+
   await page.getByRole('button', { name: 'Завершить досрочно' }).click()
   await page.getByRole('button', { name: 'Да, завершить' }).click()
   await expect(page.getByText('Челлендж завершён', { exact: true }).first()).toBeVisible()
