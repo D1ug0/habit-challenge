@@ -11,7 +11,9 @@ const emit = defineEmits<{
   updated: [challenge: ChallengeDetails]
 }>()
 
-const loading = ref(false)
+type CheckInAction = 'check-in' | 'undo'
+
+const pendingAction = ref<CheckInAction | null>(null)
 const error = ref<string | null>(null)
 
 const label = computed(() => {
@@ -21,23 +23,26 @@ const label = computed(() => {
   return 'Выполнено сегодня'
 })
 
-async function checkIn(): Promise<void> {
-  loading.value = true
+async function updateCheckIn(action: CheckInAction): Promise<void> {
+  if (pendingAction.value || props.challenge.phase !== 'active') return
+  if (action === 'check-in' && props.challenge.checkedInToday) return
+  if (action === 'undo' && !props.challenge.checkedInToday) return
+
+  pendingAction.value = action
   error.value = null
   try {
     const response = await $fetch<CheckInResponse>(
-      `/api/challenges/${props.challenge.id}/check-ins`,
-      {
-        method: 'POST',
-        body: {},
-      },
+      action === 'check-in'
+        ? `/api/challenges/${props.challenge.id}/check-ins`
+        : `/api/challenges/${props.challenge.id}/check-ins/today`,
+      action === 'check-in' ? { method: 'POST', body: {} } : { method: 'DELETE' },
     )
     emit('updated', response.challenge)
     impactFeedback()
   } catch (requestError: unknown) {
     error.value = getApiErrorMessage(requestError)
   } finally {
-    loading.value = false
+    pendingAction.value = null
   }
 }
 </script>
@@ -47,12 +52,27 @@ async function checkIn(): Promise<void> {
     <button
       class="button-primary check-in-button"
       type="button"
-      :disabled="loading || challenge.checkedInToday || challenge.phase !== 'active'"
-      @click="checkIn"
+      :disabled="pendingAction !== null || challenge.checkedInToday || challenge.phase !== 'active'"
+      @click="updateCheckIn('check-in')"
     >
       <span v-if="!challenge.checkedInToday" class="button-symbol">↗</span>
-      {{ loading ? 'Отмечаем…' : label }}
+      {{ pendingAction === 'check-in' ? 'Отмечаем…' : label }}
     </button>
+    <div
+      v-if="challenge.checkedInToday && challenge.phase === 'active'"
+      class="undo-row"
+      aria-live="polite"
+    >
+      <span>Нажали случайно?</span>
+      <button
+        type="button"
+        class="undo-button"
+        :disabled="pendingAction !== null"
+        @click="updateCheckIn('undo')"
+      >
+        {{ pendingAction === 'undo' ? 'Отменяем…' : 'Отменить отметку' }}
+      </button>
+    </div>
     <p v-if="error" class="action-error" role="alert">{{ error }}</p>
   </div>
 </template>
@@ -69,6 +89,26 @@ async function checkIn(): Promise<void> {
 }
 .button-symbol {
   font-size: 1.35rem;
+}
+.undo-row {
+  min-height: 34px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  color: var(--muted);
+  font-size: 0.76rem;
+}
+.undo-button {
+  border: 0;
+  padding: 7px 5px;
+  background: transparent;
+  color: var(--accent);
+  font-weight: 800;
+  cursor: pointer;
+}
+.undo-button:disabled {
+  cursor: wait;
 }
 .action-error {
   margin: 0;

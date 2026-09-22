@@ -41,6 +41,18 @@ test('пользователь создаёт челлендж и быстро �
     data: {},
   })
   expect(duplicateResponse.status()).toBe(409)
+
+  await page.getByRole('button', { name: 'Отменить отметку' }).click()
+  await expect(page.getByRole('button', { name: 'Выполнено сегодня' })).toBeEnabled()
+
+  await page.reload()
+  await expect(page.getByRole('button', { name: 'Выполнено сегодня' })).toBeEnabled()
+  await expect(page.getByText('Первая отметка появится здесь.')).toBeVisible()
+
+  const repeatedUndoResponse = await page.request.delete(
+    `/api/challenges/${challengeId}/check-ins/today`,
+  )
+  expect(repeatedUndoResponse.status()).toBe(404)
 })
 
 test('создатель завершает и удаляет групповой челлендж', async ({ page }) => {
