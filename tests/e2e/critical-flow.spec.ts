@@ -13,7 +13,7 @@ test('прямая ссылка на форму корректно гидрат�
   expect(hydrationWarnings).toEqual([])
 })
 
-test('пользователь создаёт челлендж и отмечает выполнение', async ({ page }) => {
+test('пользователь создаёт челлендж и быстро отмечает выполнение с главной', async ({ page }) => {
   const title = `Читать каждый день ${Date.now()}`
   await page.goto('/')
 
@@ -24,10 +24,19 @@ test('пользователь создаёт челлендж и отмечае
 
   await expect(page).toHaveURL(/\/challenges\/[0-9a-f-]+$/)
   await expect(page.getByRole('heading', { name: title })).toBeVisible()
-  await page.getByRole('button', { name: 'Выполнено сегодня' }).click()
+  const challengeId = new URL(page.url()).pathname.split('/').at(-1)
+
+  await page.getByRole('link', { name: 'Habit Challenge — на главную' }).click()
+  const quickCheckIn = page.getByRole('button', {
+    name: `Отметить «${title}» выполненным сегодня`,
+  })
+  await expect(quickCheckIn).toBeVisible()
+  await quickCheckIn.click()
+  await expect(page.getByRole('button', { name: `${title}: сегодня выполнено` })).toBeDisabled()
+
+  await page.getByRole('link', { name: new RegExp(title) }).click()
   await expect(page.getByRole('button', { name: 'Сегодня выполнено ✓' })).toBeDisabled()
 
-  const challengeId = new URL(page.url()).pathname.split('/').at(-1)
   const duplicateResponse = await page.request.post(`/api/challenges/${challengeId}/check-ins`, {
     data: {},
   })

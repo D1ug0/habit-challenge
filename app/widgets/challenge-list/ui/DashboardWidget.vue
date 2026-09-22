@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import type { ChallengeListResponse, ChallengeSummary } from '#shared/types/api'
+import { sortChallengesForDashboard } from '~/entities/challenge/model/sort-challenges'
 import ChallengeCard from '~/entities/challenge/ui/ChallengeCard.vue'
+import QuickCheckInButton from '~/features/check-in/ui/QuickCheckInButton.vue'
 import { getApiErrorMessage } from '~/shared/api/error'
 
 const session = useSessionStore()
@@ -14,6 +16,16 @@ const activeChallenges = computed(
 const bestStreak = computed(() =>
   Math.max(0, ...challenges.value.map((challenge) => challenge.streak)),
 )
+const orderedChallenges = computed(() => sortChallengesForDashboard(challenges.value))
+
+function updateChallenge(updatedChallenge: ChallengeSummary): void {
+  const challengeIndex = challenges.value.findIndex(
+    (challenge) => challenge.id === updatedChallenge.id,
+  )
+  if (challengeIndex === -1) return
+
+  challenges.value.splice(challengeIndex, 1, updatedChallenge)
+}
 
 async function loadChallenges(): Promise<void> {
   if (session.status !== 'ready') {
@@ -104,7 +116,15 @@ watch(
       <div v-else-if="error" class="error-box">{{ error }}</div>
 
       <div v-else-if="challenges.length" class="challenge-grid">
-        <ChallengeCard v-for="challenge in challenges" :key="challenge.id" :challenge="challenge" />
+        <ChallengeCard
+          v-for="challenge in orderedChallenges"
+          :key="challenge.id"
+          :challenge="challenge"
+        >
+          <template v-if="challenge.phase === 'active'" #action>
+            <QuickCheckInButton :challenge="challenge" @updated="updateChallenge" />
+          </template>
+        </ChallengeCard>
       </div>
 
       <div v-else class="empty-state card">

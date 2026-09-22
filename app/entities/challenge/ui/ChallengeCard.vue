@@ -13,32 +13,41 @@ const phaseLabels = {
 </script>
 
 <template>
-  <NuxtLink :to="`/challenges/${challenge.id}`" class="challenge-card card">
-    <div class="challenge-topline">
-      <span class="challenge-emoji" aria-hidden="true">{{ challenge.emoji }}</span>
-      <span class="phase">{{ phaseLabels[challenge.phase] }}</span>
-      <span v-if="challenge.checkedInToday" class="done-mark" title="Сегодня выполнено">✓</span>
+  <article class="challenge-card card">
+    <NuxtLink :to="`/challenges/${challenge.id}`" class="challenge-card-link">
+      <div class="challenge-topline">
+        <span class="challenge-emoji" aria-hidden="true">{{ challenge.emoji }}</span>
+        <span class="phase">{{ phaseLabels[challenge.phase] }}</span>
+        <span v-if="challenge.checkedInToday" class="done-mark" title="Сегодня выполнено">✓</span>
+      </div>
+      <div>
+        <h2>{{ challenge.title }}</h2>
+        <p>
+          {{ challenge.completedDays }} из {{ challenge.durationDays }} дней · серия
+          {{ challenge.streak }}
+        </p>
+      </div>
+      <div class="progress-track" :aria-label="`Прогресс ${challenge.progress}%`">
+        <span :style="{ width: `${challenge.progress}%` }" />
+      </div>
+      <div class="card-footer">
+        <span>{{ challenge.progress }}%</span>
+        <span v-if="challenge.type === 'group'">{{ challenge.participantsCount }} участн.</span>
+        <span v-else>личный</span>
+      </div>
+    </NuxtLink>
+    <div v-if="$slots.action" class="card-action">
+      <slot name="action" />
     </div>
-    <div>
-      <h2>{{ challenge.title }}</h2>
-      <p>
-        {{ challenge.completedDays }} из {{ challenge.durationDays }} дней · серия
-        {{ challenge.streak }}
-      </p>
-    </div>
-    <div class="progress-track" :aria-label="`Прогресс ${challenge.progress}%`">
-      <span :style="{ width: `${challenge.progress}%` }" />
-    </div>
-    <div class="card-footer">
-      <span>{{ challenge.progress }}%</span>
-      <span v-if="challenge.type === 'group'">{{ challenge.participantsCount }} участн.</span>
-      <span v-else>личный</span>
-    </div>
-  </NuxtLink>
+  </article>
 </template>
 
 <style scoped>
 .challenge-card {
+  overflow: hidden;
+}
+
+.challenge-card-link {
   color: var(--text);
   text-decoration: none;
   padding: 18px;
@@ -46,6 +55,10 @@ const phaseLabels = {
   display: grid;
   gap: 20px;
   align-content: space-between;
+}
+
+.card-action {
+  padding: 0 12px 12px;
 }
 
 .challenge-topline,
