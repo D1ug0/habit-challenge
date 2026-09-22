@@ -4,6 +4,7 @@ import { sortChallengesForDashboard } from '~/entities/challenge/model/sort-chal
 import ChallengeCard from '~/entities/challenge/ui/ChallengeCard.vue'
 import QuickCheckInButton from '~/features/check-in/ui/QuickCheckInButton.vue'
 import { getApiErrorMessage } from '~/shared/api/error'
+import { useRefreshOnResume } from '~/shared/lib/useRefreshOnResume'
 
 const session = useSessionStore()
 const challenges = ref<ChallengeSummary[]>([])
@@ -28,7 +29,7 @@ function updateChallenge(updatedChallenge: ChallengeSummary): void {
 }
 
 async function loadChallenges(): Promise<void> {
-  if (session.status !== 'ready') {
+  if (session.status !== 'ready' || loading.value) {
     return
   }
   loading.value = true
@@ -42,6 +43,11 @@ async function loadChallenges(): Promise<void> {
     loading.value = false
   }
 }
+
+useRefreshOnResume(loadChallenges, () => [
+  session.user?.timeZone ?? 'UTC',
+  ...challenges.value.map((challenge) => challenge.timeZone),
+])
 
 watch(
   () => session.status,

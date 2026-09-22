@@ -1,4 +1,5 @@
 import type { ChallengePhase } from '../types/api'
+import { getDateInTimeZone } from './time'
 
 const dayMilliseconds = 86_400_000
 
@@ -7,7 +8,7 @@ function asUtcDate(date: string): Date {
 }
 
 export function getTodayUtc(now = new Date()): string {
-  return now.toISOString().slice(0, 10)
+  return getDateInTimeZone('UTC', now)
 }
 
 export function addDays(date: string, amount: number): string {

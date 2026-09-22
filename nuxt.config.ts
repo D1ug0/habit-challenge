@@ -15,9 +15,28 @@ const allowedDevHost = z
   ])
   .parse(process.env.NUXT_DEV_ALLOWED_HOST ?? '')
 
+const isProduction = process.env.NODE_ENV === 'production'
+const securityHeaders = {
+  'Content-Security-Policy': [
+    "default-src 'self'",
+    "script-src 'self' 'unsafe-inline' https://telegram.org",
+    "style-src 'self' 'unsafe-inline'",
+    "img-src 'self' data: https:",
+    "connect-src 'self' https://telegram.org",
+    "font-src 'self' data:",
+    "frame-ancestors 'self' https://*.telegram.org",
+    "base-uri 'self'",
+    "form-action 'self'",
+  ].join('; '),
+  'Referrer-Policy': 'strict-origin-when-cross-origin',
+  'X-Content-Type-Options': 'nosniff',
+  'Permissions-Policy': 'camera=(), microphone=(), geolocation=()',
+}
+
 export default defineNuxtConfig({
   compatibilityDate: '2026-09-01',
-  devtools: { enabled: true },
+  devtools: { enabled: !isProduction },
+  routeRules: isProduction ? { '/**': { headers: securityHeaders } } : {},
   modules: ['@pinia/nuxt', '@nuxt/eslint'],
   css: ['~/assets/css/main.css'],
   vite: {

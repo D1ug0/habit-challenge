@@ -1,4 +1,66 @@
+import { createHmac } from 'node:crypto'
+import type { BrowserContext } from '@playwright/test'
 import { expect, test } from '@playwright/test'
+
+const baseUrl = 'http://127.0.0.1:3000'
+const botToken = 'habit-challenge-e2e-bot-token'
+
+interface ChallengeApiResponse {
+  challenge: {
+    timeZone: string
+    leaderboard: Array<{ user: Record<string, unknown> }>
+  }
+}
+
+interface TelegramTestUser {
+  id: number
+  first_name: string
+  username: string
+}
+
+function createInitData(user: TelegramTestUser): string {
+  const params = new URLSearchParams({
+    auth_date: String(Math.floor(Date.now() / 1000)),
+    query_id: `e2e-${user.id}-${Date.now()}`,
+    user: JSON.stringify(user),
+  })
+  const dataCheckString = [...params.entries()]
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([key, value]) => `${key}=${value}`)
+    .join('\n')
+  const secretKey = createHmac('sha256', 'WebAppData').update(botToken).digest()
+  const hash = createHmac('sha256', secretKey).update(dataCheckString).digest('hex')
+  params.set('hash', hash)
+  return params.toString()
+}
+
+async function installTelegramMock(
+  context: BrowserContext,
+  user: TelegramTestUser,
+  startParam?: string,
+): Promise<void> {
+  await context.addInitScript(
+    ({ initData, launchParam }) => {
+      Object.defineProperty(window, 'Telegram', {
+        configurable: true,
+        value: {
+          WebApp: {
+            initData,
+            initDataUnsafe: launchParam ? { start_param: launchParam } : {},
+            ready() {},
+            expand() {},
+            HapticFeedback: { notificationOccurred() {} },
+          },
+        },
+      })
+    },
+    { initData: createInitData(user), launchParam: startParam },
+  )
+}
+
+async function blockTelegramScript(context: BrowserContext): Promise<void> {
+  await context.route('https://telegram.org/js/telegram-web-app.js', (route) => route.abort())
+}
 
 test('прямая ссылка на форму корректно гидратируется и авторизуется', async ({ page }) => {
   const hydrationWarnings: string[] = []
@@ -11,6 +73,12 @@ test('прямая ссылка на форму корректно гидрат�
   await page.goto('/challenges/new')
   await expect(page.getByRole('button', { name: 'Начать челлендж' })).toBeEnabled()
   expect(hydrationWarnings).toEqual([])
+})
+
+test('health-check подтверждает соединение с базой', async ({ request }) => {
+  const response = await request.get('/api/health')
+  expect(response.ok()).toBe(true)
+  expect(await response.json()).toMatchObject({ status: 'ok', database: 'connected' })
 })
 
 test('пользователь создаёт челлендж и быстро отмечает выполнение с главной', async ({ page }) => {
@@ -53,6 +121,76 @@ test('пользователь создаёт челлендж и быстро �
     `/api/challenges/${challengeId}/check-ins/today`,
   )
   expect(repeatedUndoResponse.status()).toBe(404)
+  expect((await page.request.delete(`/api/challenges/${challengeId}`)).ok()).toBe(true)
+})
+
+test('второй пользователь вступает по deep link и выходит из группы', async ({ browser }) => {
+  const ownerContext = await browser.newContext({ baseURL: baseUrl, timezoneId: 'Europe/Moscow' })
+  await installTelegramMock(ownerContext, {
+    id: 999100001,
+    first_name: 'Владелец',
+    username: 'e2e_owner',
+  })
+  await blockTelegramScript(ownerContext)
+  const ownerPage = await ownerContext.newPage()
+
+  let challengeId = ''
+  try {
+    const title = `Группа с выходом ${Date.now()}`
+    await ownerPage.goto('/challenges/new')
+    await expect(ownerPage.getByRole('button', { name: 'Начать челлендж' })).toBeEnabled()
+    await ownerPage.getByLabel('Название').fill(title)
+    await ownerPage.getByText('Вместе', { exact: true }).click()
+    await ownerPage.getByRole('button', { name: 'Начать челлендж' }).click()
+    await expect(ownerPage.getByRole('heading', { name: title })).toBeVisible()
+    challengeId = new URL(ownerPage.url()).pathname.split('/').at(-1) ?? ''
+    const ownerDetails = (await (
+      await ownerPage.request.get(`/api/challenges/${challengeId}`)
+    ).json()) as ChallengeApiResponse
+    expect(ownerDetails.challenge.timeZone).toBe('Europe/Moscow')
+
+    const memberContext = await browser.newContext({
+      baseURL: baseUrl,
+      timezoneId: 'America/New_York',
+    })
+    await installTelegramMock(
+      memberContext,
+      { id: 999100002, first_name: 'Участник', username: 'e2e_member' },
+      `challenge_${challengeId}`,
+    )
+    await blockTelegramScript(memberContext)
+    const memberPage = await memberContext.newPage()
+
+    try {
+      await memberPage.goto('/')
+      await expect(memberPage).toHaveURL(`/join/${challengeId}`)
+      await memberPage.getByRole('button', { name: 'Присоединиться' }).click()
+      await expect(memberPage).toHaveURL(`/challenges/${challengeId}`)
+      await expect(memberPage.locator('.person-name').filter({ hasText: 'Участник' })).toBeVisible()
+      await expect(memberPage.getByText('Владелец', { exact: true })).toBeVisible()
+      const memberDetails = (await (
+        await memberPage.request.get(`/api/challenges/${challengeId}`)
+      ).json()) as ChallengeApiResponse
+      expect(memberDetails.challenge.leaderboard).toHaveLength(2)
+      expect(
+        memberDetails.challenge.leaderboard.every((entry) => !('telegramId' in entry.user)),
+      ).toBe(true)
+
+      await memberPage.getByRole('button', { name: 'Выполнено сегодня' }).click()
+      await memberPage.getByRole('button', { name: 'Покинуть челлендж' }).click()
+      await memberPage.getByRole('button', { name: 'Да, покинуть' }).click()
+      await expect(memberPage).toHaveURL('/')
+
+      await ownerPage.reload()
+      await expect(ownerPage.getByText('1 участн.', { exact: true })).toBeVisible()
+      await expect(ownerPage.getByText('Участник', { exact: true })).toBeHidden()
+    } finally {
+      await memberContext.close()
+    }
+  } finally {
+    if (challengeId) await ownerPage.request.delete(`/api/challenges/${challengeId}`)
+    await ownerContext.close()
+  }
 })
 
 test('создатель завершает и удаляет групповой челлендж', async ({ page }) => {

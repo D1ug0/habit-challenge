@@ -12,10 +12,11 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:e2e": "playwright test",
-    "format": "prettier --write app server shared tests \"*.ts\" \"*.mjs\" \"*.json\"",
-    "format:check": "prettier --check app server shared tests \"*.ts\" \"*.mjs\" \"*.json\"",
+    "format": "prettier --write app server shared tests scripts .github README.md \"*.ts\" \"*.mjs\" \"*.json\"",
+    "format:check": "prettier --check app server shared tests scripts .github README.md \"*.ts\" \"*.mjs\" \"*.json\"",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
+    "db:backup": "node --env-file-if-exists=.env.example --env-file-if-exists=.env scripts/backup-db.mjs",
     "db:studio": "drizzle-kit studio"
   },
   "dependencies": {

@@ -8,6 +8,7 @@ import {
   getCurrentChallengeDay,
   hasDailyCheckIn,
 } from '../../shared/domain/challenge'
+import { getDateInTimeZone, isValidTimeZone } from '../../shared/domain/time'
 
 describe('расчёт streak', () => {
   it('считает непрерывную серию, включая сегодня', () => {
@@ -58,5 +59,20 @@ describe('один check-in в день', () => {
   it('отклоняет check-in вне периода челленджа', () => {
     expect(canCheckIn('2026-09-10', 7, [], '2026-09-09')).toBe(false)
     expect(canCheckIn('2026-09-10', 7, [], '2026-09-17')).toBe(false)
+  })
+})
+
+describe('часовые пояса', () => {
+  it('определяет локальную календарную дату пользователя', () => {
+    const instant = new Date('2026-09-22T21:30:00.000Z')
+
+    expect(getDateInTimeZone('UTC', instant)).toBe('2026-09-22')
+    expect(getDateInTimeZone('Europe/Moscow', instant)).toBe('2026-09-23')
+    expect(getDateInTimeZone('America/New_York', instant)).toBe('2026-09-22')
+  })
+
+  it('отклоняет неизвестный часовой пояс', () => {
+    expect(isValidTimeZone('Europe/Moscow')).toBe(true)
+    expect(isValidTimeZone('Mars/Olympus')).toBe(false)
   })
 })

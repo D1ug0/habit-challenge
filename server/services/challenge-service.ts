@@ -8,12 +8,13 @@ import type { CreateChallengeInput } from '#shared/schemas/challenge'
 import {
   calculateProgress,
   calculateStreak,
+  addDays,
   getChallengeEndDate,
   getChallengePhase,
   getCurrentChallengeDay,
-  getTodayUtc,
   hasDailyCheckIn,
 } from '#shared/domain/challenge'
+import { getDateInTimeZone } from '#shared/domain/time'
 import {
   canJoinChallenge,
   canLeaveChallenge,
@@ -25,12 +26,15 @@ import type { Database } from '../database'
 import {
   addParticipant,
   countParticipants,
+  countParticipantsForChallenges,
   createChallengeRecord,
   deleteChallengeRecord,
   findChallengeById,
+  findChallengeCheckIns,
   findChallengesForUser,
   findParticipants,
   findUserCheckIns,
+  findUserCheckInsForChallenges,
   finishChallengeRecord,
   insertCheckIn,
   removeCheckIn,
@@ -41,7 +45,7 @@ import type {
   CheckInRecord,
   ParticipantWithUser,
 } from '../repositories/challenge-repository'
-import { toUserDto } from '../repositories/user-repository'
+import { toParticipantUserDto } from '../repositories/user-repository'
 import { apiError, isUniqueViolation } from '../utils/api-error'
 
 function toCheckInDto(checkIn: CheckInRecord) {
@@ -52,16 +56,13 @@ function toCheckInDto(checkIn: CheckInRecord) {
   }
 }
 
-async function toSummary(
-  db: Database,
+function makeSummary(
   challenge: ChallengeRecord,
-  userId: string,
-  today: string,
-): Promise<ChallengeSummary> {
-  const [userCheckIns, participantsCount] = await Promise.all([
-    findUserCheckIns(db, challenge.id, userId),
-    countParticipants(db, challenge.id),
-  ])
+  userCheckIns: CheckInRecord[],
+  participantsCount: number,
+  userToday: string,
+  challengeToday: string,
+): ChallengeSummary {
   const checkInDates = userCheckIns.map((checkIn) => checkIn.date)
 
   return {
@@ -74,21 +75,43 @@ async function toSummary(
     durationDays: challenge.durationDays,
     startDate: challenge.startDate,
     endDate: getChallengeEndDate(challenge.startDate, challenge.durationDays),
+    timeZone: challenge.timeZone,
     finishedAt: challenge.finishedAt?.toISOString() ?? null,
     createdAt: challenge.createdAt.toISOString(),
     progress: calculateProgress(checkInDates, challenge.durationDays),
     completedDays: new Set(checkInDates).size,
-    streak: calculateStreak(checkInDates, today),
-    currentDay: getCurrentChallengeDay(challenge.startDate, challenge.durationDays, today),
+    streak: calculateStreak(checkInDates, userToday),
+    currentDay: getCurrentChallengeDay(challenge.startDate, challenge.durationDays, challengeToday),
     phase: getChallengePhase(
       challenge.startDate,
       challenge.durationDays,
-      today,
+      challengeToday,
       challenge.finishedAt,
     ),
-    checkedInToday: hasDailyCheckIn(checkInDates, today),
+    checkedInToday: hasDailyCheckIn(checkInDates, userToday),
     participantsCount,
   }
+}
+
+async function toSummary(
+  db: Database,
+  challenge: ChallengeRecord,
+  userId: string,
+  userTimeZone: string,
+  now: Date,
+): Promise<ChallengeSummary> {
+  const [userCheckIns, participantsCount] = await Promise.all([
+    findUserCheckIns(db, challenge.id, userId),
+    countParticipants(db, challenge.id),
+  ])
+
+  return makeSummary(
+    challenge,
+    userCheckIns,
+    participantsCount,
+    getDateInTimeZone(userTimeZone, now),
+    getDateInTimeZone(challenge.timeZone, now),
+  )
 }
 
 async function makeLeaderboard(
@@ -96,20 +119,25 @@ async function makeLeaderboard(
   challengeId: string,
   participants: ParticipantWithUser[],
   currentUserId: string,
-  today: string,
+  now: Date,
 ): Promise<LeaderboardEntry[]> {
-  const rows = await Promise.all(
-    participants.map(async ({ user }) => {
-      const participantCheckIns = await findUserCheckIns(db, challengeId, user.id)
-      const dates = participantCheckIns.map((checkIn) => checkIn.date)
-      return {
-        user: toUserDto(user),
-        completedDays: new Set(dates).size,
-        streak: calculateStreak(dates, today),
-        isCurrentUser: user.id === currentUserId,
-      }
-    }),
-  )
+  const challengeCheckIns = await findChallengeCheckIns(db, challengeId)
+  const datesByUser = new Map<string, string[]>()
+  for (const checkIn of challengeCheckIns) {
+    const dates = datesByUser.get(checkIn.userId) ?? []
+    dates.push(checkIn.date)
+    datesByUser.set(checkIn.userId, dates)
+  }
+
+  const rows = participants.map(({ user }) => {
+    const dates = datesByUser.get(user.id) ?? []
+    return {
+      user: toParticipantUserDto(user),
+      completedDays: new Set(dates).size,
+      streak: calculateStreak(dates, getDateInTimeZone(user.timeZone, now)),
+      isCurrentUser: user.id === currentUserId,
+    }
+  })
 
   return rows
     .sort(
@@ -121,10 +149,34 @@ async function makeLeaderboard(
     .map((entry, index) => ({ ...entry, rank: index + 1 }))
 }
 
-export async function listChallenges(db: Database, userId: string): Promise<ChallengeSummary[]> {
-  const today = getTodayUtc()
-  const records = await findChallengesForUser(db, userId)
-  return Promise.all(records.map((challenge) => toSummary(db, challenge, userId, today)))
+export async function listChallenges(
+  db: Database,
+  currentUser: UserDto,
+): Promise<ChallengeSummary[]> {
+  const records = await findChallengesForUser(db, currentUser.id)
+  const challengeIds = records.map((challenge) => challenge.id)
+  const [checkIns, participantCounts] = await Promise.all([
+    findUserCheckInsForChallenges(db, challengeIds, currentUser.id),
+    countParticipantsForChallenges(db, challengeIds),
+  ])
+  const checkInsByChallenge = new Map<string, CheckInRecord[]>()
+  for (const checkIn of checkIns) {
+    const challengeCheckIns = checkInsByChallenge.get(checkIn.challengeId) ?? []
+    challengeCheckIns.push(checkIn)
+    checkInsByChallenge.set(checkIn.challengeId, challengeCheckIns)
+  }
+
+  const now = new Date()
+  const userToday = getDateInTimeZone(currentUser.timeZone, now)
+  return records.map((challenge) =>
+    makeSummary(
+      challenge,
+      checkInsByChallenge.get(challenge.id) ?? [],
+      participantCounts.get(challenge.id) ?? 0,
+      userToday,
+      getDateInTimeZone(challenge.timeZone, now),
+    ),
+  )
 }
 
 export async function createChallenge(
@@ -132,16 +184,14 @@ export async function createChallenge(
   owner: UserDto,
   input: CreateChallengeInput,
 ): Promise<ChallengeDetails> {
-  const today = getTodayUtc()
-  const latestStart = new Date()
-  latestStart.setUTCFullYear(latestStart.getUTCFullYear() + 1)
-  const latestStartDate = latestStart.toISOString().slice(0, 10)
+  const today = getDateInTimeZone(owner.timeZone)
+  const latestStartDate = addDays(today, 365)
 
   if (input.startDate < today || input.startDate > latestStartDate) {
     apiError(422, 'START_DATE_OUT_OF_RANGE', 'Дата старта должна быть в пределах ближайшего года')
   }
 
-  const challenge = await createChallengeRecord(db, owner.id, input)
+  const challenge = await createChallengeRecord(db, owner.id, owner.timeZone, input)
   return getChallengeDetails(db, challenge.id, owner, '')
 }
 
@@ -163,12 +213,12 @@ export async function getChallengeDetails(
   }
 
   const isParticipant = canViewChallenge(currentUser.id, challenge, participantIds)
-  const today = getTodayUtc()
-  const summary = await toSummary(db, challenge, currentUser.id, today)
+  const now = new Date()
+  const summary = await toSummary(db, challenge, currentUser.id, currentUser.timeZone, now)
   const checkIns = isParticipant ? await findUserCheckIns(db, challengeId, currentUser.id) : []
   const leaderboard =
     challenge.type === 'group' && isParticipant
-      ? await makeLeaderboard(db, challengeId, participants, currentUser.id, today)
+      ? await makeLeaderboard(db, challengeId, participants, currentUser.id, now)
       : []
 
   return {
@@ -201,10 +251,16 @@ export async function checkInToday(
     apiError(403, 'NOT_A_PARTICIPANT', 'Сначала присоединитесь к челленджу')
   }
 
-  const today = getTodayUtc()
+  const now = new Date()
+  const challengeToday = getDateInTimeZone(challenge.timeZone, now)
+  const userToday = getDateInTimeZone(currentUser.timeZone, now)
   if (
-    getChallengePhase(challenge.startDate, challenge.durationDays, today, challenge.finishedAt) !==
-    'active'
+    getChallengePhase(
+      challenge.startDate,
+      challenge.durationDays,
+      challengeToday,
+      challenge.finishedAt,
+    ) !== 'active'
   ) {
     apiError(409, 'CHALLENGE_NOT_ACTIVE', 'Сегодня этот челлендж не активен')
   }
@@ -213,14 +269,14 @@ export async function checkInToday(
   if (
     hasDailyCheckIn(
       checkIns.map((checkIn) => checkIn.date),
-      today,
+      userToday,
     )
   ) {
     apiError(409, 'ALREADY_CHECKED_IN', 'Сегодня уже отмечено')
   }
 
   try {
-    await insertCheckIn(db, challengeId, currentUser.id, today)
+    await insertCheckIn(db, challengeId, currentUser.id, userToday)
   } catch (error: unknown) {
     if (isUniqueViolation(error)) {
       apiError(409, 'ALREADY_CHECKED_IN', 'Сегодня уже отмечено')
@@ -257,14 +313,19 @@ export async function undoTodayCheckIn(
     getChallengePhase(
       challenge.startDate,
       challenge.durationDays,
-      getTodayUtc(),
+      getDateInTimeZone(challenge.timeZone),
       challenge.finishedAt,
     ) !== 'active'
   ) {
     apiError(409, 'CHALLENGE_NOT_ACTIVE', 'Этот челлендж уже завершён или ещё не начался')
   }
 
-  const removed = await removeCheckIn(db, challengeId, currentUser.id, getTodayUtc())
+  const removed = await removeCheckIn(
+    db,
+    challengeId,
+    currentUser.id,
+    getDateInTimeZone(currentUser.timeZone),
+  )
   if (!removed) {
     apiError(404, 'CHECK_IN_NOT_FOUND', 'Сегодняшняя отметка не найдена')
   }
@@ -293,7 +354,7 @@ export async function joinChallenge(
     getChallengePhase(
       challenge.startDate,
       challenge.durationDays,
-      getTodayUtc(),
+      getDateInTimeZone(challenge.timeZone),
       challenge.finishedAt,
     ) === 'completed'
   ) {
@@ -336,7 +397,7 @@ export async function leaveChallenge(
     getChallengePhase(
       challenge.startDate,
       challenge.durationDays,
-      getTodayUtc(),
+      getDateInTimeZone(challenge.timeZone),
       challenge.finishedAt,
     ) === 'completed'
   ) {
@@ -364,7 +425,7 @@ export async function finishChallenge(
     getChallengePhase(
       challenge.startDate,
       challenge.durationDays,
-      getTodayUtc(),
+      getDateInTimeZone(challenge.timeZone),
       challenge.finishedAt,
     ) === 'completed'
   ) {

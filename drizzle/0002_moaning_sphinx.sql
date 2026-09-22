@@ -1,0 +1,3 @@
+ALTER TABLE "challenges" ADD COLUMN "time_zone" varchar(64) DEFAULT 'UTC' NOT NULL;--> statement-breakpoint
+ALTER TABLE "users" ADD COLUMN "time_zone" varchar(64) DEFAULT 'UTC' NOT NULL;--> statement-breakpoint
+ALTER TABLE "check_ins" ADD CONSTRAINT "check_ins_challenge_participant_fk" FOREIGN KEY ("challenge_id","user_id") REFERENCES "public"."challenge_participants"("challenge_id","user_id") ON DELETE cascade ON UPDATE no action;

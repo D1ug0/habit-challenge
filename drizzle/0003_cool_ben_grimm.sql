@@ -1,0 +1,1 @@
+ALTER TABLE "challenges" ADD CONSTRAINT "challenges_duration_days_check" CHECK ("challenges"."duration_days" in (7, 14, 30));

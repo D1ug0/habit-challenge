@@ -27,16 +27,18 @@ export type ServerConfig = z.infer<typeof serverConfigSchema>
 
 export function getServerConfig(event: H3Event): ServerConfig {
   const runtimeConfig = useRuntimeConfig(event)
-  const demoMode = runtimeConfig.public.demoMode
+  const demoMode = process.env.NUXT_PUBLIC_DEMO_MODE ?? runtimeConfig.public.demoMode
   const developmentSecret =
     String(demoMode) === 'true' ? 'habit-challenge-local-development-secret' : ''
 
   return serverConfigSchema.parse({
-    databaseUrl: runtimeConfig.databaseUrl,
-    telegramBotToken: runtimeConfig.telegramBotToken,
-    authSessionSecret: runtimeConfig.authSessionSecret || developmentSecret,
-    authMaxAgeSeconds: runtimeConfig.authMaxAgeSeconds,
+    databaseUrl: process.env.DATABASE_URL ?? runtimeConfig.databaseUrl,
+    telegramBotToken: process.env.TELEGRAM_BOT_TOKEN ?? runtimeConfig.telegramBotToken,
+    authSessionSecret:
+      process.env.AUTH_SESSION_SECRET || runtimeConfig.authSessionSecret || developmentSecret,
+    authMaxAgeSeconds: process.env.AUTH_MAX_AGE_SECONDS ?? runtimeConfig.authMaxAgeSeconds,
     demoMode,
-    telegramBotUsername: runtimeConfig.public.telegramBotUsername,
+    telegramBotUsername:
+      process.env.NUXT_PUBLIC_TELEGRAM_BOT_USERNAME ?? runtimeConfig.public.telegramBotUsername,
   })
 }

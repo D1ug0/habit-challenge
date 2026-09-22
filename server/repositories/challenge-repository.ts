@@ -1,4 +1,4 @@
-import { and, asc, desc, eq } from 'drizzle-orm'
+import { and, asc, count, desc, eq, inArray } from 'drizzle-orm'
 import type { CreateChallengeInput } from '#shared/schemas/challenge'
 import type { Database } from '../database'
 import { challengeParticipants, challenges, checkIns, users } from '../database/schema'
@@ -15,6 +15,7 @@ export interface ParticipantWithUser {
 export async function createChallengeRecord(
   db: Database,
   ownerId: string,
+  timeZone: string,
   input: CreateChallengeInput,
 ): Promise<ChallengeRecord> {
   return db.transaction(async (transaction) => {
@@ -28,6 +29,7 @@ export async function createChallengeRecord(
         type: input.type,
         durationDays: input.durationDays,
         startDate: input.startDate,
+        timeZone,
       })
       .returning()
 
@@ -108,11 +110,26 @@ export async function findParticipants(
 }
 
 export async function countParticipants(db: Database, challengeId: string): Promise<number> {
-  const participants = await db
-    .select({ id: challengeParticipants.id })
+  const [result] = await db
+    .select({ count: count() })
     .from(challengeParticipants)
     .where(eq(challengeParticipants.challengeId, challengeId))
-  return participants.length
+  return result?.count ?? 0
+}
+
+export async function countParticipantsForChallenges(
+  db: Database,
+  challengeIds: readonly string[],
+): Promise<Map<string, number>> {
+  if (challengeIds.length === 0) return new Map()
+
+  const rows = await db
+    .select({ challengeId: challengeParticipants.challengeId, count: count() })
+    .from(challengeParticipants)
+    .where(inArray(challengeParticipants.challengeId, [...challengeIds]))
+    .groupBy(challengeParticipants.challengeId)
+
+  return new Map(rows.map((row) => [row.challengeId, row.count]))
 }
 
 export async function findUserCheckIns(
@@ -124,6 +141,31 @@ export async function findUserCheckIns(
     .select()
     .from(checkIns)
     .where(and(eq(checkIns.challengeId, challengeId), eq(checkIns.userId, userId)))
+    .orderBy(desc(checkIns.date))
+}
+
+export async function findUserCheckInsForChallenges(
+  db: Database,
+  challengeIds: readonly string[],
+  userId: string,
+): Promise<CheckInRecord[]> {
+  if (challengeIds.length === 0) return []
+
+  return db
+    .select()
+    .from(checkIns)
+    .where(and(inArray(checkIns.challengeId, [...challengeIds]), eq(checkIns.userId, userId)))
+    .orderBy(desc(checkIns.date))
+}
+
+export async function findChallengeCheckIns(
+  db: Database,
+  challengeId: string,
+): Promise<CheckInRecord[]> {
+  return db
+    .select()
+    .from(checkIns)
+    .where(eq(checkIns.challengeId, challengeId))
     .orderBy(desc(checkIns.date))
 }
 
@@ -173,21 +215,15 @@ export async function removeParticipantAndCheckIns(
   challengeId: string,
   userId: string,
 ): Promise<boolean> {
-  return db.transaction(async (transaction) => {
-    await transaction
-      .delete(checkIns)
-      .where(and(eq(checkIns.challengeId, challengeId), eq(checkIns.userId, userId)))
+  const deletedParticipants = await db
+    .delete(challengeParticipants)
+    .where(
+      and(
+        eq(challengeParticipants.challengeId, challengeId),
+        eq(challengeParticipants.userId, userId),
+      ),
+    )
+    .returning({ id: challengeParticipants.id })
 
-    const deletedParticipants = await transaction
-      .delete(challengeParticipants)
-      .where(
-        and(
-          eq(challengeParticipants.challengeId, challengeId),
-          eq(challengeParticipants.userId, userId),
-        ),
-      )
-      .returning({ id: challengeParticipants.id })
-
-    return deletedParticipants.length > 0
-  })
+  return deletedParticipants.length > 0
 }

@@ -1,0 +1,57 @@
+name: CI
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+
+jobs:
+  quality:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_DB: habit_challenge
+          POSTGRES_USER: habit
+          POSTGRES_PASSWORD: habit
+        ports:
+          - 5433:5432
+        options: >-
+          --health-cmd "pg_isready -U habit -d habit_challenge"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      DATABASE_URL: postgresql://habit:habit@127.0.0.1:5433/habit_challenge
+      AUTH_SESSION_SECRET: habit-challenge-ci-session-secret-32-characters
+      AUTH_MAX_AGE_SECONDS: 86400
+      NUXT_PUBLIC_DEMO_MODE: true
+      TELEGRAM_BOT_TOKEN: habit-challenge-e2e-bot-token
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.0.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm db:migrate
+      - run: pnpm format:check
+      - run: pnpm lint
+      - run: pnpm typecheck
+      - run: pnpm test
+      - run: pnpm build
+      - run: pnpm exec playwright install --with-deps chromium
+      - run: pnpm test:e2e
+      - if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: playwright-report/
+          retention-days: 7

@@ -5,10 +5,12 @@ import { joinChallenge } from '../../../services/challenge-service'
 import { parseBody } from '../../../utils/api-error'
 import { getServerConfig } from '../../../utils/config'
 import { getChallengeId } from '../../../utils/route'
+import { enforceMutationRateLimit } from '../../../utils/rate-limit'
 import { requireUser } from '../../../utils/session'
 
 export default defineEventHandler(async (event): Promise<JoinChallengeResponse> => {
   const [user] = await Promise.all([requireUser(event), parseBody(event, emptyMutationSchema)])
+  enforceMutationRateLimit(event, user.id)
   const config = getServerConfig(event)
   return joinChallenge(getDatabase(event), getChallengeId(event), user, config.telegramBotUsername)
 })

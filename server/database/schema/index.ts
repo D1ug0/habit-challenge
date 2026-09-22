@@ -1,5 +1,8 @@
+import { sql } from 'drizzle-orm'
 import {
+  check,
   date,
+  foreignKey,
   index,
   integer,
   pgEnum,
@@ -22,6 +25,7 @@ export const users = pgTable(
     firstName: varchar('first_name', { length: 128 }).notNull(),
     lastName: varchar('last_name', { length: 128 }),
     photoUrl: text('photo_url'),
+    timeZone: varchar('time_zone', { length: 64 }).default('UTC').notNull(),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   },
   (table) => [uniqueIndex('users_telegram_id_unique').on(table.telegramId)],
@@ -40,10 +44,14 @@ export const challenges = pgTable(
     type: challengeType('type').notNull(),
     durationDays: integer('duration_days').notNull(),
     startDate: date('start_date', { mode: 'string' }).notNull(),
+    timeZone: varchar('time_zone', { length: 64 }).default('UTC').notNull(),
     finishedAt: timestamp('finished_at', { withTimezone: true }),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   },
-  (table) => [index('challenges_owner_id_index').on(table.ownerId)],
+  (table) => [
+    index('challenges_owner_id_index').on(table.ownerId),
+    check('challenges_duration_days_check', sql`${table.durationDays} in (7, 14, 30)`),
+  ],
 )
 
 export const challengeParticipants = pgTable(
@@ -83,6 +91,11 @@ export const checkIns = pgTable(
       table.userId,
       table.date,
     ),
+    foreignKey({
+      columns: [table.challengeId, table.userId],
+      foreignColumns: [challengeParticipants.challengeId, challengeParticipants.userId],
+      name: 'check_ins_challenge_participant_fk',
+    }).onDelete('cascade'),
     index('check_ins_challenge_id_index').on(table.challengeId),
   ],
 )

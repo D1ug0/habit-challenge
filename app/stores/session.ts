@@ -1,7 +1,7 @@
 import { defineStore } from 'pinia'
 import type { AuthResponse, UserDto } from '#shared/types/api'
 import { getApiErrorMessage } from '~/shared/api/error'
-import { expand, getInitData, ready } from '~/shared/telegram'
+import { expand, getInitData, getUserTimeZone, ready } from '~/shared/telegram'
 
 type SessionStatus = 'idle' | 'loading' | 'ready' | 'error'
 
@@ -24,7 +24,7 @@ export const useSessionStore = defineStore('session', () => {
     try {
       const response = await $fetch<AuthResponse>('/api/auth/telegram', {
         method: 'POST',
-        body: { initData: getInitData() },
+        body: { initData: getInitData(), timeZone: getUserTimeZone() },
       })
       user.value = response.user
       mode.value = response.mode

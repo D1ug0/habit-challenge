@@ -2,7 +2,10 @@
 import type { ChallengeDetailsResponse } from '#shared/types/api'
 import { createChallengeSchema } from '#shared/schemas/challenge'
 import type { CreateChallengeInput } from '#shared/schemas/challenge'
+import { addDays } from '#shared/domain/challenge'
+import { getDateInTimeZone } from '#shared/domain/time'
 import { getApiErrorMessage } from '~/shared/api/error'
+import { getUserTimeZone } from '~/shared/telegram'
 
 const session = useSessionStore()
 const form = reactive<CreateChallengeInput>({
@@ -11,12 +14,21 @@ const form = reactive<CreateChallengeInput>({
   emoji: '🌱',
   type: 'personal',
   durationDays: 14,
-  startDate: new Date().toISOString().slice(0, 10),
+  startDate: '',
 })
+const minStartDate = ref('')
+const maxStartDate = ref('')
 const emojiOptions = ['🌱', '🏃', '📚', '💧', '🧘', '🎨', '💪', '☀️']
 const submitting = ref(false)
 const error = ref<string | null>(null)
 const fieldErrors = ref<Record<string, string>>({})
+
+onMounted(() => {
+  const today = getDateInTimeZone(getUserTimeZone())
+  minStartDate.value = today
+  maxStartDate.value = addDays(today, 365)
+  if (!form.startDate) form.startDate = today
+})
 
 async function submit(): Promise<void> {
   error.value = null
@@ -125,7 +137,14 @@ async function submit(): Promise<void> {
         </div>
         <div class="field">
           <label class="field-label" for="start-date">Начать</label>
-          <input id="start-date" v-model="form.startDate" class="input" type="date" />
+          <input
+            id="start-date"
+            v-model="form.startDate"
+            class="input"
+            type="date"
+            :min="minStartDate"
+            :max="maxStartDate"
+          />
           <span v-if="fieldErrors.startDate" class="field-error">{{ fieldErrors.startDate }}</span>
         </div>
       </div>

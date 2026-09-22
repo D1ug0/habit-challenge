@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { isValidTimeZone } from '#shared/domain/time'
 
 interface TelegramHapticFeedback {
   impactOccurred(style: 'light' | 'medium' | 'heavy' | 'rigid' | 'soft'): void
@@ -49,6 +50,11 @@ export function expand(): void {
 
 export function getInitData(): string {
   return getWebApp()?.initData ?? ''
+}
+
+export function getUserTimeZone(): string {
+  const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone
+  return isValidTimeZone(timeZone) ? timeZone : 'UTC'
 }
 
 export function getLaunchChallengeId(): string | null {

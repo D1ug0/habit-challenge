@@ -5,6 +5,7 @@ import LeaveChallengeAction from '~/features/leave-challenge/ui/LeaveChallengeAc
 import ManageChallengeActions from '~/features/manage-challenge/ui/ManageChallengeActions.vue'
 import ShareChallengeButton from '~/features/share-challenge/ui/ShareChallengeButton.vue'
 import { getApiErrorMessage } from '~/shared/api/error'
+import { useRefreshOnResume } from '~/shared/lib/useRefreshOnResume'
 
 const props = defineProps<{
   challengeId: string
@@ -31,7 +32,7 @@ function formatDate(date: string): string {
 }
 
 async function loadChallenge(): Promise<void> {
-  if (session.status !== 'ready') return
+  if (session.status !== 'ready' || loading.value) return
   loading.value = true
   error.value = null
   try {
@@ -43,6 +44,11 @@ async function loadChallenge(): Promise<void> {
     loading.value = false
   }
 }
+
+useRefreshOnResume(loadChallenge, () => [
+  session.user?.timeZone ?? 'UTC',
+  challenge.value?.timeZone ?? 'UTC',
+])
 
 watch(
   [() => session.status, () => props.challengeId],

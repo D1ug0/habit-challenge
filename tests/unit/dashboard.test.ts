@@ -18,6 +18,7 @@ function makeChallenge(
     durationDays: 7,
     startDate: '2026-09-01',
     endDate: '2026-09-07',
+    timeZone: 'Europe/Moscow',
     finishedAt: null,
     createdAt,
     progress: 0,

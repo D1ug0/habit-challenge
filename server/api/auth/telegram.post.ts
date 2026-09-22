@@ -4,11 +4,13 @@ import { getDatabase } from '../../database'
 import { toUserDto, upsertTelegramUser } from '../../repositories/user-repository'
 import { apiError, asConfigurationError, parseBody } from '../../utils/api-error'
 import { getServerConfig } from '../../utils/config'
+import { enforceAuthRateLimit } from '../../utils/rate-limit'
 import { setUserSession } from '../../utils/session'
 import { validateTelegramInitData } from '../../utils/telegram-auth'
 
 export default defineEventHandler(async (event): Promise<AuthResponse> => {
   try {
+    enforceAuthRateLimit(event)
     const body = await parseBody(event, telegramAuthSchema)
     const config = getServerConfig(event)
     let mode: AuthResponse['mode']
@@ -42,7 +44,10 @@ export default defineEventHandler(async (event): Promise<AuthResponse> => {
       mode = 'demo'
     }
 
-    const user = await upsertTelegramUser(getDatabase(event), identity)
+    const user = await upsertTelegramUser(getDatabase(event), {
+      ...identity,
+      timeZone: body.timeZone,
+    })
     setUserSession(event, user.id)
 
     return { user: toUserDto(user), mode }

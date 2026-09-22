@@ -8,7 +8,14 @@ export interface UserDto {
   firstName: string
   lastName: string | null
   photoUrl: string | null
+  timeZone: string
   createdAt: string
+}
+
+export interface ParticipantUserDto {
+  id: string
+  firstName: string
+  photoUrl: string | null
 }
 
 export interface AuthResponse {
@@ -26,6 +33,7 @@ export interface ChallengeSummary {
   durationDays: number
   startDate: string
   endDate: string
+  timeZone: string
   finishedAt: string | null
   createdAt: string
   progress: number
@@ -44,7 +52,7 @@ export interface CheckInDto {
 }
 
 export interface LeaderboardEntry {
-  user: UserDto
+  user: ParticipantUserDto
   completedDays: number
   streak: number
   rank: number

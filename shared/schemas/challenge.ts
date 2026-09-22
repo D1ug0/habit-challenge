@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { isValidTimeZone } from '../domain/time'
 
 const isoDatePattern = /^\d{4}-\d{2}-\d{2}$/
 
@@ -24,6 +25,7 @@ export const createChallengeSchema = z.object({
 
 export const telegramAuthSchema = z.object({
   initData: z.string().max(16_384),
+  timeZone: z.string().trim().max(64).refine(isValidTimeZone, 'Некорректный часовой пояс'),
 })
 
 export const emptyMutationSchema = z.object({}).strict()
