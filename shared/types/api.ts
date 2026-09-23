@@ -75,6 +75,13 @@ export interface ChallengeListResponse {
   challenges: ChallengeSummary[]
   page: number
   hasMore: boolean
+  stats: DashboardStats
+}
+
+export interface DashboardStats {
+  activeChallenges: number
+  totalChallenges: number
+  bestStreak: number
 }
 
 export interface ChallengeDetailsResponse {

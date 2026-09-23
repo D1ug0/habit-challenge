@@ -1,5 +1,6 @@
 import { createHmac } from 'node:crypto'
 import { expect, test } from '@playwright/test'
+import { getDateInTimeZone } from '../../shared/domain/time'
 
 const botToken = 'habit-challenge-e2e-bot-token'
 
@@ -82,6 +83,19 @@ test('закрытая группа требует приглашение, а и
         await member.request.post(`/api/challenges/${challengeId}/join`, { data: { inviteToken } })
       ).ok(),
     ).toBe(true)
+    expect(
+      (await member.request.post(`/api/challenges/${challengeId}/check-ins`, { data: {} })).ok(),
+    ).toBe(true)
+    expect(
+      (await owner.request.post(`/api/challenges/${challengeId}/finish`, { data: {} })).ok(),
+    ).toBe(true)
+    expect(
+      (
+        await owner.request.delete(`/api/challenges/${challengeId}/participants/${memberId}`)
+      ).status(),
+    ).toBe(409)
+    const completedDetails = await member.request.get(`/api/challenges/${challengeId}`)
+    expect((await completedDetails.json()).challenge.checkIns).toHaveLength(1)
     expect((await owner.request.delete(`/api/challenges/${challengeId}`)).ok()).toBe(true)
   } finally {
     await owner.close()
@@ -99,6 +113,12 @@ test('профиль, статистика, конкурентная отмет�
         await context.request.post('/api/auth/telegram', { data: { initData, timeZone: 'UTC' } })
       ).ok(),
     ).toBe(true)
+    expect(
+      (
+        await context.request.post('/api/auth/telegram', { data: { initData, timeZone: 'UTC' } })
+      ).ok(),
+    ).toBe(true)
+    expect((await (await context.request.get('/api/me/sessions')).json()).sessions).toHaveLength(1)
     const profile = await context.request.patch('/api/me', {
       data: { timeZone: 'UTC', reminderEnabled: true, reminderHour: 19 },
     })
@@ -189,10 +209,99 @@ test('dashboard отдаёт челленджи страницами по 20', a
     const second = await (await context.request.get('/api/challenges?page=2')).json()
     expect(first.challenges).toHaveLength(20)
     expect(first.hasMore).toBe(true)
+    expect(first.stats.totalChallenges).toBe(21)
+    expect(first.stats.activeChallenges).toBe(21)
     expect(second.challenges).toHaveLength(1)
     expect(second.hasMore).toBe(false)
+    await context.addInitScript((data) => {
+      Object.defineProperty(window, 'Telegram', {
+        configurable: true,
+        value: { WebApp: { initData: data, ready() {}, expand() {} } },
+      })
+    }, initData)
+    await context.route('https://telegram.org/js/telegram-web-app.js', (route) => route.abort())
+    const page = await context.newPage()
+    await page.goto('/')
+    await expect(page.locator('.stats-strip div').nth(2).locator('strong')).toHaveText('21')
+    await expect(page.getByRole('heading', { name: 'Начни с малого' })).toHaveCount(0)
+    await page.getByRole('button', { name: 'Загрузить ещё' }).click()
+    await expect(page.getByRole('button', { name: 'Загрузить ещё' })).toHaveCount(0)
+    await expect(page.getByRole('heading', { name: 'Начни с малого' })).toHaveCount(0)
   } finally {
     await context.request.delete('/api/me')
     await context.close()
+  }
+})
+
+test('отметка использует день челленджа при разных поясах и после смены профиля', async ({
+  browser,
+}) => {
+  const owner = await browser.newContext({ baseURL: 'http://127.0.0.1:3000' })
+  const member = await browser.newContext({ baseURL: 'http://127.0.0.1:3000' })
+  const unique = Date.now() + Math.floor(Math.random() * 100_000)
+  const challengeDay = getDateInTimeZone('Pacific/Kiritimati')
+  let challengeId = ''
+  try {
+    expect(
+      (
+        await owner.request.post('/api/auth/telegram', {
+          data: {
+            initData: signedInitData(1_500_000_000 + unique, 'Создатель'),
+            timeZone: 'Pacific/Kiritimati',
+          },
+        })
+      ).ok(),
+    ).toBe(true)
+    expect(
+      (
+        await member.request.post('/api/auth/telegram', {
+          data: {
+            initData: signedInitData(1_600_000_000 + unique, 'Участник'),
+            timeZone: 'Etc/GMT+12',
+          },
+        })
+      ).ok(),
+    ).toBe(true)
+    const created = await owner.request.post('/api/challenges', {
+      data: {
+        title: 'Один календарный день',
+        description: '',
+        emoji: '🌱',
+        type: 'group',
+        isPrivate: false,
+        durationDays: 7,
+        startDate: challengeDay,
+      },
+    })
+    expect(created.ok()).toBe(true)
+    challengeId = (await created.json()).challenge.id as string
+    expect(
+      (await member.request.post(`/api/challenges/${challengeId}/join`, { data: {} })).ok(),
+    ).toBe(true)
+    const checked = await member.request.post(`/api/challenges/${challengeId}/check-ins`, {
+      data: {},
+    })
+    expect(checked.ok()).toBe(true)
+    const details = (await checked.json()).challenge
+    expect(details.checkIns[0].date).toBe(challengeDay)
+    expect(details.checkedInToday).toBe(true)
+    const analytics = await member.request.get('/api/analytics')
+    expect((await analytics.json()).last7Days).toBe(1)
+    expect(
+      (
+        await member.request.patch('/api/me', {
+          data: { timeZone: 'Pacific/Kiritimati', reminderEnabled: false, reminderHour: 19 },
+        })
+      ).ok(),
+    ).toBe(true)
+    expect(
+      (
+        await member.request.post(`/api/challenges/${challengeId}/check-ins`, { data: {} })
+      ).status(),
+    ).toBe(409)
+  } finally {
+    if (challengeId) await owner.request.delete(`/api/challenges/${challengeId}`)
+    await owner.close()
+    await member.close()
   }
 })

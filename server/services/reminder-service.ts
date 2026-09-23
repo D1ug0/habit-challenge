@@ -17,7 +17,6 @@ export function getHourInTimeZone(timeZone: string, now: Date): number {
 async function hasUncheckedActiveChallenge(
   db: Database,
   userId: string,
-  timeZone: string,
   now: Date,
 ): Promise<boolean> {
   const challenges = await findChallengesForUser(db, userId)
@@ -36,9 +35,13 @@ async function hasUncheckedActiveChallenge(
     active.map((challenge) => challenge.id),
     userId,
   )
-  const today = getDateInTimeZone(timeZone, now)
+  const activeDates = new Map(
+    active.map((challenge) => [challenge.id, getDateInTimeZone(challenge.timeZone, now)]),
+  )
   const checked = new Set(
-    checkIns.filter((checkIn) => checkIn.date === today).map((checkIn) => checkIn.challengeId),
+    checkIns
+      .filter((checkIn) => checkIn.date === activeDates.get(checkIn.challengeId))
+      .map((checkIn) => checkIn.challengeId),
   )
   return active.some((challenge) => !checked.has(challenge.id))
 }
@@ -53,7 +56,7 @@ export async function sendDueReminders(
   let failed = 0
   for (const user of candidates) {
     if (getHourInTimeZone(user.timeZone, now) !== user.reminderHour) continue
-    if (!(await hasUncheckedActiveChallenge(db, user.id, user.timeZone, now))) continue
+    if (!(await hasUncheckedActiveChallenge(db, user.id, now))) continue
     const date = getDateInTimeZone(user.timeZone, now)
     const claimResult = await db.execute<{ id: string }>(sql`
       insert into reminder_deliveries (user_id, date, status, claimed_at)

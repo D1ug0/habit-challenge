@@ -247,7 +247,10 @@ watch(
         @updated="challenge = $event"
         @deleted="navigateTo('/')"
       />
-      <section v-if="challenge.type === 'group' && challenge.isOwner" class="card moderation">
+      <section
+        v-if="challenge.type === 'group' && challenge.isOwner && challenge.phase !== 'completed'"
+        class="card moderation"
+      >
         <h2>Участники</h2>
         <p>Исключённый участник теряет отметки и не сможет вступить снова.</p>
         <div

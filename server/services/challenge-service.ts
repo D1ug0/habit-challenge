@@ -1,6 +1,7 @@
 import type {
   ChallengeDetails,
   ChallengeSummary,
+  ChallengeListResponse,
   LeaderboardEntry,
   UserDto,
 } from '#shared/types/api'
@@ -29,6 +30,7 @@ import {
   editChallengeRecord,
   deleteChallengeRecord,
   findChallengeById,
+  findDashboardStats,
   findBannedUsers,
   findLeaderboardPage,
   findChallengesForUserPage,
@@ -58,7 +60,6 @@ function makeSummary(
   challenge: ChallengeRecord,
   userCheckIns: CheckInRecord[],
   participantsCount: number,
-  userToday: string,
   challengeToday: string,
 ): ChallengeSummary {
   const checkInDates = userCheckIns.map((checkIn) => checkIn.date)
@@ -79,7 +80,7 @@ function makeSummary(
     createdAt: challenge.createdAt.toISOString(),
     progress: calculateProgress(checkInDates, challenge.durationDays),
     completedDays: new Set(checkInDates).size,
-    streak: calculateStreak(checkInDates, userToday),
+    streak: calculateStreak(checkInDates, challengeToday),
     currentDay: getCurrentChallengeDay(challenge.startDate, challenge.durationDays, challengeToday),
     phase: getChallengePhase(
       challenge.startDate,
@@ -87,7 +88,7 @@ function makeSummary(
       challengeToday,
       challenge.finishedAt,
     ),
-    checkedInToday: hasDailyCheckIn(checkInDates, userToday),
+    checkedInToday: hasDailyCheckIn(checkInDates, challengeToday),
     participantsCount,
   }
 }
@@ -96,7 +97,6 @@ async function toSummary(
   db: Database,
   challenge: ChallengeRecord,
   userId: string,
-  userTimeZone: string,
   now: Date,
 ): Promise<ChallengeSummary> {
   const [userCheckIns, participantsCount] = await Promise.all([
@@ -108,7 +108,6 @@ async function toSummary(
     challenge,
     userCheckIns,
     participantsCount,
-    getDateInTimeZone(userTimeZone, now),
     getDateInTimeZone(challenge.timeZone, now),
   )
 }
@@ -153,9 +152,12 @@ export async function listChallenges(
   db: Database,
   currentUser: UserDto,
   page = 1,
-): Promise<{ challenges: ChallengeSummary[]; page: number; hasMore: boolean }> {
+): Promise<ChallengeListResponse> {
   const pageSize = 20
-  const recordsWithExtra = await findChallengesForUserPage(db, currentUser.id, page, pageSize)
+  const [recordsWithExtra, stats] = await Promise.all([
+    findChallengesForUserPage(db, currentUser.id, page, pageSize),
+    findDashboardStats(db, currentUser.id),
+  ])
   const hasMore = recordsWithExtra.length > pageSize
   const records = recordsWithExtra.slice(0, pageSize)
   const challengeIds = records.map((challenge) => challenge.id)
@@ -171,17 +173,15 @@ export async function listChallenges(
   }
 
   const now = new Date()
-  const userToday = getDateInTimeZone(currentUser.timeZone, now)
   const summaries = records.map((challenge) =>
     makeSummary(
       challenge,
       checkInsByChallenge.get(challenge.id) ?? [],
       participantCounts.get(challenge.id) ?? 0,
-      userToday,
       getDateInTimeZone(challenge.timeZone, now),
     ),
   )
-  return { challenges: summaries, page, hasMore }
+  return { challenges: summaries, page, hasMore, stats }
 }
 
 export async function createChallenge(
@@ -225,7 +225,7 @@ export async function getChallengeDetails(
 
   const isParticipant = canViewChallenge(currentUser.id, challenge, participantIds)
   const now = new Date()
-  const summary = await toSummary(db, challenge, currentUser.id, currentUser.timeZone, now)
+  const summary = await toSummary(db, challenge, currentUser.id, now)
   const checkIns = isParticipant ? await findUserCheckIns(db, challengeId, currentUser.id) : []
   const leaderboard =
     challenge.type === 'group' && isParticipant
@@ -253,12 +253,7 @@ export async function checkInToday(
   currentUser: UserDto,
   botUsername: string,
 ): Promise<ChallengeDetails> {
-  const status = await insertCheckInIfActive(
-    db,
-    challengeId,
-    currentUser.id,
-    getDateInTimeZone(currentUser.timeZone),
-  )
+  const status = await insertCheckInIfActive(db, challengeId, currentUser.id)
   if (status === 'missing') apiError(404, 'CHALLENGE_NOT_FOUND', 'Челлендж не найден')
   if (status === 'inactive')
     apiError(409, 'CHALLENGE_NOT_ACTIVE', 'Сегодня этот челлендж не активен')
@@ -275,12 +270,7 @@ export async function undoTodayCheckIn(
   currentUser: UserDto,
   botUsername: string,
 ): Promise<ChallengeDetails> {
-  const status = await removeTodayCheckInIfActive(
-    db,
-    challengeId,
-    currentUser.id,
-    getDateInTimeZone(currentUser.timeZone),
-  )
+  const status = await removeTodayCheckInIfActive(db, challengeId, currentUser.id)
   if (status === 'missing') apiError(404, 'CHALLENGE_NOT_FOUND', 'Челлендж не найден')
   if (status === 'inactive')
     apiError(409, 'CHALLENGE_NOT_ACTIVE', 'Этот челлендж уже завершён или ещё не начался')
@@ -339,12 +329,22 @@ export async function banParticipant(
   if (!challenge) apiError(404, 'CHALLENGE_NOT_FOUND', 'Челлендж не найден')
   if (!canManageChallenge(currentUser.id, challenge) || challenge.type !== 'group')
     apiError(403, 'CHALLENGE_ACCESS_DENIED', 'Управлять участниками может только создатель группы')
+  if (
+    getChallengePhase(
+      challenge.startDate,
+      challenge.durationDays,
+      getDateInTimeZone(challenge.timeZone),
+      challenge.finishedAt,
+    ) === 'completed'
+  )
+    apiError(409, 'CHALLENGE_COMPLETED', 'Участников завершённого челленджа исключить нельзя')
   if (participantId === currentUser.id)
     apiError(403, 'OWNER_CANNOT_LEAVE', 'Создателя исключить нельзя')
   const participants = await findParticipants(db, challengeId)
   if (!participants.some(({ user }) => user.id === participantId))
     apiError(404, 'PARTICIPANT_NOT_FOUND', 'Участник не найден')
-  await removeAndBanParticipant(db, challengeId, participantId)
+  if (!(await removeAndBanParticipant(db, challengeId, participantId)))
+    apiError(409, 'CHALLENGE_COMPLETED', 'Участников завершённого челленджа исключить нельзя')
 }
 
 export async function listBans(

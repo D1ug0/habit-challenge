@@ -24,7 +24,7 @@ export default defineEventHandler(async (event): Promise<AnalyticsResponse> => {
   }))
   const counts = new Map(days.map((day) => [day.date, day]))
   for (const checkIn of checkIns) {
-    const day = counts.get(checkIn.date)
+    const day = counts.get(getDateInTimeZone(user.timeZone, checkIn.createdAt))
     if (day) day.count += 1
   }
   const phase = (challenge: (typeof challenges)[number]) =>

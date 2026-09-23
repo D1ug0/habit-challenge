@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { ChallengeListResponse, ChallengeSummary } from '#shared/types/api'
+import type { ChallengeListResponse, ChallengeSummary, DashboardStats } from '#shared/types/api'
 import { sortChallengesForDashboard } from '~/entities/challenge/model/sort-challenges'
 import ChallengeCard from '~/entities/challenge/ui/ChallengeCard.vue'
 import QuickCheckInButton from '~/features/check-in/ui/QuickCheckInButton.vue'
@@ -12,13 +12,7 @@ const loading = ref(false)
 const error = ref<string | null>(null)
 const page = ref(1)
 const hasMore = ref(false)
-
-const activeChallenges = computed(
-  () => challenges.value.filter((challenge) => challenge.phase === 'active').length,
-)
-const bestStreak = computed(() =>
-  Math.max(0, ...challenges.value.map((challenge) => challenge.streak)),
-)
+const stats = ref<DashboardStats | null>(null)
 const orderedChallenges = computed(() => sortChallengesForDashboard(challenges.value))
 
 function updateChallenge(updatedChallenge: ChallengeSummary): void {
@@ -28,6 +22,8 @@ function updateChallenge(updatedChallenge: ChallengeSummary): void {
   if (challengeIndex === -1) return
 
   challenges.value.splice(challengeIndex, 1, updatedChallenge)
+  if (stats.value)
+    stats.value.bestStreak = Math.max(stats.value.bestStreak, updatedChallenge.streak)
 }
 
 async function loadChallenges(nextPage = 1): Promise<void> {
@@ -44,6 +40,7 @@ async function loadChallenges(nextPage = 1): Promise<void> {
       nextPage === 1 ? response.challenges : [...challenges.value, ...response.challenges]
     page.value = response.page
     hasMore.value = response.hasMore
+    stats.value = response.stats
   } catch (requestError: unknown) {
     error.value = getApiErrorMessage(requestError)
   } finally {
@@ -108,15 +105,15 @@ watch(
     <template v-else>
       <div class="stats-strip">
         <div>
-          <strong>{{ activeChallenges }}</strong>
+          <strong>{{ stats?.activeChallenges ?? 0 }}</strong>
           <span>активных</span>
         </div>
         <div>
-          <strong>{{ bestStreak }}</strong>
-          <span>лучшая серия</span>
+          <strong>{{ stats?.bestStreak ?? 0 }}</strong>
+          <span>лучшая текущая серия</span>
         </div>
         <div>
-          <strong>{{ challenges.length }}</strong>
+          <strong>{{ stats?.totalChallenges ?? 0 }}</strong>
           <span>всего</span>
         </div>
       </div>
@@ -153,7 +150,7 @@ watch(
         Загрузить ещё
       </button>
 
-      <div v-else class="empty-state card">
+      <div v-if="!loading && !error && challenges.length === 0" class="empty-state card">
         <span class="empty-icon">↗</span>
         <h2>Начни с малого</h2>
         <p>Выбери действие, которое хочется повторять. Семь дней — отличный первый шаг.</p>

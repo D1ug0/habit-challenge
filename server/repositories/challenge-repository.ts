@@ -1,6 +1,7 @@
 import { and, asc, count, desc, eq, inArray, isNull, sql } from 'drizzle-orm'
 import { randomBytes } from 'node:crypto'
 import type { CreateChallengeInput, EditChallengeInput } from '#shared/schemas/challenge'
+import type { DashboardStats } from '#shared/types/api'
 import { getChallengePhase } from '../../shared/domain/challenge'
 import { getDateInTimeZone } from '../../shared/domain/time'
 import type { Database } from '../database'
@@ -51,15 +52,15 @@ export async function findLeaderboardPage(
       select p.user_id,
         count(d.date) as completed_days,
         count(d.date) filter (where d.date =
-          (case when d.latest = (now() at time zone u.time_zone)::date
-            then (now() at time zone u.time_zone)::date
-            else (now() at time zone u.time_zone)::date - 1 end) - (d.rn - 1)::integer
+          (case when d.latest = (now() at time zone c.time_zone)::date
+            then (now() at time zone c.time_zone)::date
+            else (now() at time zone c.time_zone)::date - 1 end) - (d.rn - 1)::integer
         ) as streak
       from challenge_participants p
-      join users u on u.id = p.user_id
+      join challenges c on c.id = p.challenge_id
       left join dated d on d.user_id = p.user_id
       where p.challenge_id = ${challengeId}
-      group by p.user_id, u.time_zone
+      group by p.user_id, c.time_zone
     )
     select u.id as user_id, u.first_name, u.photo_url,
       s.completed_days, s.streak
@@ -135,13 +136,23 @@ export async function removeAndBanParticipant(
   db: Database,
   challengeId: string,
   userId: string,
-): Promise<void> {
-  await db.transaction(async (transaction) => {
-    await transaction
-      .select({ id: challenges.id })
+): Promise<boolean> {
+  return db.transaction(async (transaction) => {
+    const [challenge] = await transaction
+      .select()
       .from(challenges)
       .where(eq(challenges.id, challengeId))
       .for('update')
+    if (
+      !challenge ||
+      getChallengePhase(
+        challenge.startDate,
+        challenge.durationDays,
+        getDateInTimeZone(challenge.timeZone),
+        challenge.finishedAt,
+      ) === 'completed'
+    )
+      return false
     await transaction.insert(challengeBans).values({ challengeId, userId }).onConflictDoNothing()
     await transaction
       .delete(challengeParticipants)
@@ -151,6 +162,7 @@ export async function removeAndBanParticipant(
           eq(challengeParticipants.userId, userId),
         ),
       )
+    return true
   })
 }
 
@@ -201,6 +213,51 @@ export async function findChallengesForUserPage(
     .limit(pageSize + 1)
     .offset((page - 1) * pageSize)
   return rows.map((row) => row.challenge)
+}
+
+export async function findDashboardStats(db: Database, userId: string): Promise<DashboardStats> {
+  const result = await db.execute<{
+    total_challenges: string
+    active_challenges: string
+    best_streak: string
+  }>(sql`
+    with membership as (
+      select c.id, c.time_zone, c.start_date, c.duration_days, c.finished_at
+      from challenge_participants p
+      join challenges c on c.id = p.challenge_id
+      where p.user_id = ${userId}
+    ), dated as (
+      select ci.challenge_id, ci.date,
+        row_number() over (partition by ci.challenge_id order by ci.date desc) as rn,
+        max(ci.date) over (partition by ci.challenge_id) as latest
+      from check_ins ci
+      join membership m on m.id = ci.challenge_id
+      where ci.user_id = ${userId}
+    ), streaks as (
+      select m.id,
+        count(d.date) filter (where d.date =
+          (case when d.latest = (now() at time zone m.time_zone)::date
+            then (now() at time zone m.time_zone)::date
+            else (now() at time zone m.time_zone)::date - 1 end) - (d.rn - 1)::integer
+        ) as streak
+      from membership m
+      left join dated d on d.challenge_id = m.id
+      group by m.id, m.time_zone
+    )
+    select count(*) as total_challenges,
+      count(*) filter (where m.finished_at is null
+        and (now() at time zone m.time_zone)::date between m.start_date
+          and m.start_date + (m.duration_days - 1)) as active_challenges,
+      coalesce(max(s.streak), 0) as best_streak
+    from membership m
+    left join streaks s on s.id = m.id
+  `)
+  const row = result.rows[0]
+  return {
+    totalChallenges: Number(row?.total_challenges ?? 0),
+    activeChallenges: Number(row?.active_challenges ?? 0),
+    bestStreak: Number(row?.best_streak ?? 0),
+  }
 }
 
 export async function findChallengeById(
@@ -329,7 +386,6 @@ export async function insertCheckInIfActive(
   db: Database,
   challengeId: string,
   userId: string,
-  date: string,
 ): Promise<'created' | 'missing' | 'inactive' | 'not-participant' | 'duplicate'> {
   return db.transaction(async (transaction) => {
     const [challenge] = await transaction
@@ -338,11 +394,12 @@ export async function insertCheckInIfActive(
       .where(eq(challenges.id, challengeId))
       .for('update')
     if (!challenge) return 'missing'
+    const challengeToday = getDateInTimeZone(challenge.timeZone)
     if (
       getChallengePhase(
         challenge.startDate,
         challenge.durationDays,
-        getDateInTimeZone(challenge.timeZone),
+        challengeToday,
         challenge.finishedAt,
       ) !== 'active'
     )
@@ -360,7 +417,7 @@ export async function insertCheckInIfActive(
     if (!participant) return 'not-participant'
     const [created] = await transaction
       .insert(checkIns)
-      .values({ challengeId, userId, date })
+      .values({ challengeId, userId, date: challengeToday })
       .onConflictDoNothing()
       .returning({ id: checkIns.id })
     return created ? 'created' : 'duplicate'
@@ -423,7 +480,6 @@ export async function removeTodayCheckInIfActive(
   db: Database,
   challengeId: string,
   userId: string,
-  date: string,
 ): Promise<'removed' | 'missing' | 'inactive' | 'not-participant' | 'not-found'> {
   return db.transaction(async (transaction) => {
     const [challenge] = await transaction
@@ -432,11 +488,12 @@ export async function removeTodayCheckInIfActive(
       .where(eq(challenges.id, challengeId))
       .for('update')
     if (!challenge) return 'missing'
+    const challengeToday = getDateInTimeZone(challenge.timeZone)
     if (
       getChallengePhase(
         challenge.startDate,
         challenge.durationDays,
-        getDateInTimeZone(challenge.timeZone),
+        challengeToday,
         challenge.finishedAt,
       ) !== 'active'
     )
@@ -458,7 +515,7 @@ export async function removeTodayCheckInIfActive(
         and(
           eq(checkIns.challengeId, challengeId),
           eq(checkIns.userId, userId),
-          eq(checkIns.date, date),
+          eq(checkIns.date, challengeToday),
         ),
       )
       .returning({ id: checkIns.id })

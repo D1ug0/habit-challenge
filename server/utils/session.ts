@@ -16,6 +16,21 @@ function sign(payload: string, secret: string): string {
 
 export async function setUserSession(event: H3Event, userId: string): Promise<void> {
   const config = getServerConfig(event)
+  const existingSessionId = readSessionId(event)
+  if (existingSessionId) {
+    const [existingSession] = await getDatabase(event)
+      .select({ id: sessions.id })
+      .from(sessions)
+      .where(
+        and(
+          eq(sessions.id, existingSessionId),
+          eq(sessions.userId, userId),
+          gt(sessions.expiresAt, new Date()),
+        ),
+      )
+      .limit(1)
+    if (existingSession) return
+  }
   const expiresAt = Math.floor(Date.now() / 1000) + config.authMaxAgeSeconds
   const [session] = await getDatabase(event)
     .insert(sessions)

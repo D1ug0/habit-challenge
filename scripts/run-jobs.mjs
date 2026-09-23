@@ -26,7 +26,7 @@ async function tick() {
     } catch (error) {
       console.error(
         JSON.stringify({
-          type: 'reminder_job_failed',
+          type: 'reminder_failed',
           message: error instanceof Error ? error.message : 'Unknown error',
         }),
       )
