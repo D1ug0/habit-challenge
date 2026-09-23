@@ -10,7 +10,7 @@ import { validateTelegramInitData } from '../../utils/telegram-auth'
 
 export default defineEventHandler(async (event): Promise<AuthResponse> => {
   try {
-    enforceAuthRateLimit(event)
+    await enforceAuthRateLimit(event)
     const body = await parseBody(event, telegramAuthSchema)
     const config = getServerConfig(event)
     let mode: AuthResponse['mode']
@@ -48,7 +48,7 @@ export default defineEventHandler(async (event): Promise<AuthResponse> => {
       ...identity,
       timeZone: body.timeZone,
     })
-    setUserSession(event, user.id)
+    await setUserSession(event, user.id)
 
     return { user: toUserDto(user), mode }
   } catch (error: unknown) {

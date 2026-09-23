@@ -7,9 +7,19 @@
         <span>habit</span>
       </NuxtLink>
       <span class="header-note">каждый день имеет значение</span>
+      <NuxtLink to="/profile" class="profile-link">Профиль</NuxtLink>
     </header>
     <main class="page-shell">
       <NuxtPage />
     </main>
   </div>
 </template>
+
+<style scoped>
+.profile-link {
+  color: var(--text);
+  font-size: 0.8rem;
+  font-weight: 750;
+  text-decoration: none;
+}
+</style>

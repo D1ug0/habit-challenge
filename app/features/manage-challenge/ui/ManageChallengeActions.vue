@@ -2,6 +2,7 @@
 import type { ChallengeDetails, ChallengeDetailsResponse } from '#shared/types/api'
 import { getApiErrorMessage } from '~/shared/api/error'
 import DeleteChallengeDialog from './DeleteChallengeDialog.vue'
+import { editChallengeSchema } from '#shared/schemas/challenge'
 
 const props = defineProps<{ challenge: ChallengeDetails }>()
 const emit = defineEmits<{
@@ -9,10 +10,40 @@ const emit = defineEmits<{
   deleted: []
 }>()
 
-const pending = ref<'finish' | 'delete' | null>(null)
+const pending = ref<'finish' | 'delete' | 'edit' | null>(null)
 const confirmingFinish = ref(false)
 const deleteDialogOpen = ref(false)
 const error = ref<string | null>(null)
+const editing = ref(false)
+const editTitle = ref(props.challenge.title)
+const editDescription = ref(props.challenge.description ?? '')
+const editEmoji = ref(props.challenge.emoji)
+
+async function saveEdit(): Promise<void> {
+  const parsed = editChallengeSchema.safeParse({
+    title: editTitle.value,
+    description: editDescription.value,
+    emoji: editEmoji.value,
+  })
+  if (!parsed.success) {
+    error.value = parsed.error.issues[0]?.message ?? 'Проверьте поля'
+    return
+  }
+  pending.value = 'edit'
+  error.value = null
+  try {
+    const response = await $fetch<ChallengeDetailsResponse>(
+      `/api/challenges/${props.challenge.id}`,
+      { method: 'PATCH', body: parsed.data },
+    )
+    emit('updated', response.challenge)
+    editing.value = false
+  } catch (requestError: unknown) {
+    error.value = getApiErrorMessage(requestError)
+  } finally {
+    pending.value = null
+  }
+}
 
 function cancelConfirmation(): void {
   confirmingFinish.value = false
@@ -58,6 +89,9 @@ async function applyAction(action: 'finish' | 'delete'): Promise<void> {
       </p>
     </div>
     <div v-if="!confirmingFinish" class="actions">
+      <button type="button" class="button-ghost" @click="editing = !editing">
+        {{ editing ? 'Скрыть форму' : 'Редактировать' }}
+      </button>
       <button
         v-if="challenge.phase !== 'completed'"
         type="button"
@@ -70,6 +104,21 @@ async function applyAction(action: 'finish' | 'delete'): Promise<void> {
         Удалить челлендж
       </button>
     </div>
+    <form v-if="editing" class="edit-form" @submit.prevent="saveEdit">
+      <label class="field"
+        ><span class="field-label">Название</span
+        ><input v-model="editTitle" class="input" maxlength="80" required
+      /></label>
+      <label class="field"
+        ><span class="field-label">Описание</span
+        ><textarea v-model="editDescription" class="input" maxlength="500" />
+      </label>
+      <label class="field"
+        ><span class="field-label">Emoji</span
+        ><input v-model="editEmoji" class="input" maxlength="12" required
+      /></label>
+      <button type="submit" class="button-primary" :disabled="pending !== null">Сохранить</button>
+    </form>
     <div v-else class="confirm" role="group" aria-label="Подтвердить завершение">
       <p>Завершить сейчас? Новые отметки и вступления станут недоступны.</p>
       <div class="actions">
@@ -109,6 +158,10 @@ async function applyAction(action: 'finish' | 'delete'): Promise<void> {
   display: grid;
   gap: 12px;
   padding: 20px;
+}
+.edit-form {
+  display: grid;
+  gap: 12px;
 }
 .manage strong {
   font-size: 0.9rem;

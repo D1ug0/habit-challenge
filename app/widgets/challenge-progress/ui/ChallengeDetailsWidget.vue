@@ -1,5 +1,9 @@
 <script setup lang="ts">
-import type { ChallengeDetails, ChallengeDetailsResponse } from '#shared/types/api'
+import type {
+  ChallengeDetails,
+  ChallengeDetailsResponse,
+  LeaderboardEntry,
+} from '#shared/types/api'
 import CheckInButton from '~/features/check-in/ui/CheckInButton.vue'
 import LeaveChallengeAction from '~/features/leave-challenge/ui/LeaveChallengeAction.vue'
 import ManageChallengeActions from '~/features/manage-challenge/ui/ManageChallengeActions.vue'
@@ -15,6 +19,68 @@ const session = useSessionStore()
 const challenge = ref<ChallengeDetails | null>(null)
 const loading = ref(false)
 const error = ref<string | null>(null)
+const moderationError = ref<string | null>(null)
+const bannedUsers = ref<Array<{ id: string; firstName: string }>>([])
+const leaderboardPage = ref(1)
+const leaderboardLoading = ref(false)
+
+async function loadMoreLeaderboard(): Promise<void> {
+  if (!challenge.value || leaderboardLoading.value) return
+  leaderboardLoading.value = true
+  moderationError.value = null
+  try {
+    const nextPage = leaderboardPage.value + 1
+    const response = await $fetch<{ participants: LeaderboardEntry[]; hasMore: boolean }>(
+      `/api/challenges/${challenge.value.id}/participants`,
+      { query: { page: nextPage } },
+    )
+    challenge.value.leaderboard.push(...response.participants)
+    challenge.value.leaderboardHasMore = response.hasMore
+    leaderboardPage.value = nextPage
+  } catch (requestError: unknown) {
+    moderationError.value = getApiErrorMessage(requestError)
+  } finally {
+    leaderboardLoading.value = false
+  }
+}
+
+async function removeParticipant(userId: string): Promise<void> {
+  if (!challenge.value || !window.confirm('Исключить участника и удалить его отметки?')) return
+  moderationError.value = null
+  try {
+    await $fetch(`/api/challenges/${challenge.value.id}/participants/${userId}`, {
+      method: 'DELETE',
+    })
+    await loadChallenge()
+    await loadBans()
+  } catch (requestError: unknown) {
+    moderationError.value = getApiErrorMessage(requestError)
+  }
+}
+
+async function loadBans(): Promise<void> {
+  if (!challenge.value?.isOwner || challenge.value.type !== 'group') return
+  try {
+    bannedUsers.value = (
+      await $fetch<{ users: typeof bannedUsers.value }>(
+        `/api/challenges/${challenge.value.id}/bans`,
+      )
+    ).users
+  } catch (requestError: unknown) {
+    moderationError.value = getApiErrorMessage(requestError)
+  }
+}
+
+async function unban(userId: string): Promise<void> {
+  if (!challenge.value) return
+  moderationError.value = null
+  try {
+    await $fetch(`/api/challenges/${challenge.value.id}/bans/${userId}`, { method: 'DELETE' })
+    await loadBans()
+  } catch (requestError: unknown) {
+    moderationError.value = getApiErrorMessage(requestError)
+  }
+}
 
 const phaseText = computed(() => {
   if (!challenge.value) return ''
@@ -38,6 +104,8 @@ async function loadChallenge(): Promise<void> {
   try {
     const response = await $fetch<ChallengeDetailsResponse>(`/api/challenges/${props.challengeId}`)
     challenge.value = response.challenge
+    leaderboardPage.value = 1
+    await loadBans()
   } catch (requestError: unknown) {
     error.value = getApiErrorMessage(requestError)
   } finally {
@@ -155,6 +223,15 @@ watch(
             <strong>{{ entry.completedDays }} <small>дн.</small></strong>
           </li>
         </ol>
+        <button
+          v-if="challenge.leaderboardHasMore"
+          type="button"
+          class="button-ghost"
+          :disabled="leaderboardLoading"
+          @click="loadMoreLeaderboard"
+        >
+          {{ leaderboardLoading ? 'Загрузка…' : 'Показать ещё участников' }}
+        </button>
         <ShareChallengeButton
           v-if="challenge.inviteUrl"
           :url="challenge.inviteUrl"
@@ -170,6 +247,33 @@ watch(
         @updated="challenge = $event"
         @deleted="navigateTo('/')"
       />
+      <section v-if="challenge.type === 'group' && challenge.isOwner" class="card moderation">
+        <h2>Участники</h2>
+        <p>Исключённый участник теряет отметки и не сможет вступить снова.</p>
+        <div
+          v-for="entry in challenge.leaderboard.filter((row) => !row.isCurrentUser)"
+          :key="entry.user.id"
+          class="moderation-row"
+        >
+          <span>{{ entry.user.firstName }}</span>
+          <button type="button" class="button-ghost" @click="removeParticipant(entry.user.id)">
+            Исключить
+          </button>
+        </div>
+        <p v-if="challenge.leaderboard.length <= 1 && bannedUsers.length === 0">
+          Других участников пока нет.
+        </p>
+        <template v-if="bannedUsers.length"
+          ><h3>Исключённые</h3>
+          <div v-for="user in bannedUsers" :key="user.id" class="moderation-row">
+            <span>{{ user.firstName }}</span
+            ><button type="button" class="button-ghost" @click="unban(user.id)">
+              Разрешить вступить
+            </button>
+          </div></template
+        >
+        <p v-if="moderationError" role="alert" class="action-error">{{ moderationError }}</p>
+      </section>
       <LeaveChallengeAction
         v-else-if="
           challenge.type === 'group' && challenge.isParticipant && challenge.phase !== 'completed'
@@ -186,6 +290,31 @@ watch(
 .details-page {
   display: grid;
   gap: 25px;
+}
+.moderation {
+  padding: 20px;
+}
+.moderation h2 {
+  margin: 0;
+  font-size: 1.2rem;
+}
+.moderation p {
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+.moderation-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 0;
+  border-top: 1px solid var(--line);
+}
+.moderation-row button {
+  min-height: 40px;
+}
+.action-error {
+  color: var(--danger) !important;
 }
 .back-link {
   color: var(--muted);

@@ -11,6 +11,6 @@ export default defineEventHandler(async (event): Promise<ChallengeDetailsRespons
     requireUser(event),
     parseBody(event, createChallengeSchema),
   ])
-  enforceMutationRateLimit(event, user.id)
+  await enforceMutationRateLimit(event, user.id)
   return { challenge: await createChallenge(getDatabase(event), user, body) }
 })

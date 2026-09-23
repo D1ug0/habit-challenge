@@ -9,6 +9,8 @@ export interface UserDto {
   lastName: string | null
   photoUrl: string | null
   timeZone: string
+  reminderEnabled: boolean
+  reminderHour: number
   createdAt: string
 }
 
@@ -34,6 +36,7 @@ export interface ChallengeSummary {
   startDate: string
   endDate: string
   timeZone: string
+  isPrivate: boolean
   finishedAt: string | null
   createdAt: string
   progress: number
@@ -64,11 +67,14 @@ export interface ChallengeDetails extends ChallengeSummary {
   isParticipant: boolean
   checkIns: CheckInDto[]
   leaderboard: LeaderboardEntry[]
+  leaderboardHasMore: boolean
   inviteUrl: string | null
 }
 
 export interface ChallengeListResponse {
   challenges: ChallengeSummary[]
+  page: number
+  hasMore: boolean
 }
 
 export interface ChallengeDetailsResponse {
@@ -92,4 +98,13 @@ export interface ApiErrorData {
   code: string
   message: string
   issues?: Record<string, string>
+}
+
+export interface AnalyticsResponse {
+  totalCheckIns: number
+  last7Days: number
+  last30Days: number
+  activeChallenges: number
+  completedChallenges: number
+  days: Array<{ date: string; count: number }>
 }

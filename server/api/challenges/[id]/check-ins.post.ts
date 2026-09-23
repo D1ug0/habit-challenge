@@ -10,7 +10,7 @@ import { requireUser } from '../../../utils/session'
 
 export default defineEventHandler(async (event): Promise<CheckInResponse> => {
   const [user] = await Promise.all([requireUser(event), parseBody(event, emptyMutationSchema)])
-  enforceMutationRateLimit(event, user.id)
+  await enforceMutationRateLimit(event, user.id)
   const config = getServerConfig(event)
   return {
     challenge: await checkInToday(

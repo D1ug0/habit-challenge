@@ -21,6 +21,8 @@ const serverConfigSchema = z.object({
     .string()
     .regex(/^[A-Za-z0-9_]{5,32}$/)
     .or(z.literal('')),
+  reminderJobSecret: z.string().optional(),
+  monitoringToken: z.string().optional(),
 })
 
 export type ServerConfig = z.infer<typeof serverConfigSchema>
@@ -40,5 +42,7 @@ export function getServerConfig(event: H3Event): ServerConfig {
     demoMode,
     telegramBotUsername:
       process.env.NUXT_PUBLIC_TELEGRAM_BOT_USERNAME ?? runtimeConfig.public.telegramBotUsername,
+    reminderJobSecret: process.env.REMINDER_JOB_SECRET ?? runtimeConfig.reminderJobSecret,
+    monitoringToken: process.env.MONITORING_TOKEN ?? runtimeConfig.monitoringToken,
   })
 }

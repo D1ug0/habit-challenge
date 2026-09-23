@@ -10,6 +10,8 @@ const session = useSessionStore()
 const challenges = ref<ChallengeSummary[]>([])
 const loading = ref(false)
 const error = ref<string | null>(null)
+const page = ref(1)
+const hasMore = ref(false)
 
 const activeChallenges = computed(
   () => challenges.value.filter((challenge) => challenge.phase === 'active').length,
@@ -28,15 +30,20 @@ function updateChallenge(updatedChallenge: ChallengeSummary): void {
   challenges.value.splice(challengeIndex, 1, updatedChallenge)
 }
 
-async function loadChallenges(): Promise<void> {
+async function loadChallenges(nextPage = 1): Promise<void> {
   if (session.status !== 'ready' || loading.value) {
     return
   }
   loading.value = true
   error.value = null
   try {
-    const response = await $fetch<ChallengeListResponse>('/api/challenges')
-    challenges.value = response.challenges
+    const response = await $fetch<ChallengeListResponse>('/api/challenges', {
+      query: { page: nextPage },
+    })
+    challenges.value =
+      nextPage === 1 ? response.challenges : [...challenges.value, ...response.challenges]
+    page.value = response.page
+    hasMore.value = response.hasMore
   } catch (requestError: unknown) {
     error.value = getApiErrorMessage(requestError)
   } finally {
@@ -73,6 +80,7 @@ watch(
         <span>+</span>
       </NuxtLink>
     </div>
+    <NuxtLink to="/analytics" class="analytics-link">Посмотреть статистику →</NuxtLink>
 
     <div v-if="session.mode === 'demo'" class="demo-note">
       Demo-режим · данные сохраняются в локальной PostgreSQL
@@ -91,6 +99,10 @@ watch(
       <strong>Не удалось войти</strong><br />
       {{ session.error }}
       <button class="retry-link" type="button" @click="session.initialize">Повторить</button>
+    </div>
+    <div v-else-if="session.status === 'signed-out'" class="empty-state card">
+      <h2>Вы вышли из аккаунта</h2>
+      <button class="button-primary" type="button" @click="session.initialize">Войти снова</button>
     </div>
 
     <template v-else>
@@ -111,7 +123,7 @@ watch(
 
       <div class="section-heading">
         <h2>Челленджи</h2>
-        <button v-if="error" type="button" @click="loadChallenges">Обновить</button>
+        <button v-if="error" type="button" @click="loadChallenges()">Обновить</button>
       </div>
 
       <div v-if="loading" class="loading-grid" aria-label="Загрузка челленджей">
@@ -132,6 +144,14 @@ watch(
           </template>
         </ChallengeCard>
       </div>
+      <button
+        v-if="hasMore && !loading"
+        class="button-ghost"
+        type="button"
+        @click="loadChallenges(page + 1)"
+      >
+        Загрузить ещё
+      </button>
 
       <div v-else class="empty-state card">
         <span class="empty-icon">↗</span>
@@ -147,6 +167,12 @@ watch(
 .dashboard {
   display: grid;
   gap: 26px;
+}
+.analytics-link {
+  color: var(--accent);
+  font-size: 0.8rem;
+  font-weight: 750;
+  text-decoration: none;
 }
 .hero {
   min-height: 245px;

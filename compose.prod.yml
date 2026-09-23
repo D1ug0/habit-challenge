@@ -1,0 +1,68 @@
+services:
+  app:
+    build:
+      context: .
+      target: runtime
+    env_file: ${APP_ENV_FILE:-.env.production}
+    restart: unless-stopped
+    healthcheck:
+      test:
+        [
+          'CMD',
+          'node',
+          '-e',
+          "fetch('http://127.0.0.1:3000/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+        ]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  scheduler:
+    build:
+      context: .
+      target: runtime
+    command: ['node', 'scripts/run-jobs.mjs']
+    env_file: ${APP_ENV_FILE:-.env.production}
+    restart: unless-stopped
+    depends_on:
+      app:
+        condition: service_healthy
+
+  backup:
+    profiles: ['backup']
+    build:
+      context: .
+      target: backup
+    env_file: ${APP_ENV_FILE:-.env.production}
+    restart: unless-stopped
+    volumes:
+      - backup-cache:/app/backups
+
+  migration:
+    profiles: ['ops']
+    build:
+      context: .
+      target: build
+    command: ['pnpm', 'db:migrate']
+    env_file: ${APP_ENV_FILE:-.env.production}
+
+  caddy:
+    image: caddy:2-alpine
+    environment:
+      APP_DOMAIN: ${APP_DOMAIN:?Set APP_DOMAIN in .env.production}
+    ports:
+      - '80:80'
+      - '443:443'
+    volumes:
+      - ./ops/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    restart: unless-stopped
+    depends_on:
+      app:
+        condition: service_healthy
+
+volumes:
+  backup-cache:
+  caddy-data:
+  caddy-config:

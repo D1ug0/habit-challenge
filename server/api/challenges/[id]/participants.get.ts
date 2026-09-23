@@ -1,24 +1,15 @@
 import type { LeaderboardEntry } from '#shared/types/api'
 import { getDatabase } from '../../../database'
-import { getChallengeDetails } from '../../../services/challenge-service'
-import { apiError } from '../../../utils/api-error'
-import { getServerConfig } from '../../../utils/config'
+import { getLeaderboardPage } from '../../../services/challenge-service'
+import { listQuerySchema } from '#shared/schemas/challenge'
 import { getChallengeId } from '../../../utils/route'
 import { requireUser } from '../../../utils/session'
 
-export default defineEventHandler(async (event): Promise<{ participants: LeaderboardEntry[] }> => {
-  const user = await requireUser(event)
-  const config = getServerConfig(event)
-  const challenge = await getChallengeDetails(
-    getDatabase(event),
-    getChallengeId(event),
-    user,
-    config.telegramBotUsername,
-  )
-
-  if (!challenge.isParticipant) {
-    apiError(403, 'NOT_A_PARTICIPANT', 'Сначала присоединитесь к челленджу')
-  }
-
-  return { participants: challenge.leaderboard }
-})
+export default defineEventHandler(
+  async (event): Promise<{ participants: LeaderboardEntry[]; hasMore: boolean }> => {
+    const user = await requireUser(event)
+    const query = listQuerySchema.safeParse(getQuery(event))
+    if (!query.success) throw createError({ statusCode: 400, message: 'Некорректная страница' })
+    return getLeaderboardPage(getDatabase(event), getChallengeId(event), user, query.data.page)
+  },
+)

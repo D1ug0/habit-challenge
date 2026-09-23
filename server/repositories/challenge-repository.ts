@@ -1,7 +1,16 @@
-import { and, asc, count, desc, eq, inArray } from 'drizzle-orm'
-import type { CreateChallengeInput } from '#shared/schemas/challenge'
+import { and, asc, count, desc, eq, inArray, isNull, sql } from 'drizzle-orm'
+import { randomBytes } from 'node:crypto'
+import type { CreateChallengeInput, EditChallengeInput } from '#shared/schemas/challenge'
+import { getChallengePhase } from '../../shared/domain/challenge'
+import { getDateInTimeZone } from '../../shared/domain/time'
 import type { Database } from '../database'
-import { challengeParticipants, challenges, checkIns, users } from '../database/schema'
+import {
+  challengeBans,
+  challengeParticipants,
+  challenges,
+  checkIns,
+  users,
+} from '../database/schema'
 
 export type ChallengeRecord = typeof challenges.$inferSelect
 export type ParticipantRecord = typeof challengeParticipants.$inferSelect
@@ -10,6 +19,61 @@ export type CheckInRecord = typeof checkIns.$inferSelect
 export interface ParticipantWithUser {
   participant: ParticipantRecord
   user: typeof users.$inferSelect
+}
+
+export interface LeaderboardRecord {
+  userId: string
+  firstName: string
+  photoUrl: string | null
+  completedDays: number
+  streak: number
+}
+
+export async function findLeaderboardPage(
+  db: Database,
+  challengeId: string,
+  page: number,
+  pageSize: number,
+): Promise<LeaderboardRecord[]> {
+  const result = await db.execute<{
+    user_id: string
+    first_name: string
+    photo_url: string | null
+    completed_days: string
+    streak: string
+  }>(sql`
+    with dated as (
+      select ci.user_id, ci.date,
+        row_number() over (partition by ci.user_id order by ci.date desc) as rn,
+        max(ci.date) over (partition by ci.user_id) as latest
+      from check_ins ci where ci.challenge_id = ${challengeId}
+    ), scored as (
+      select p.user_id,
+        count(d.date) as completed_days,
+        count(d.date) filter (where d.date =
+          (case when d.latest = (now() at time zone u.time_zone)::date
+            then (now() at time zone u.time_zone)::date
+            else (now() at time zone u.time_zone)::date - 1 end) - (d.rn - 1)::integer
+        ) as streak
+      from challenge_participants p
+      join users u on u.id = p.user_id
+      left join dated d on d.user_id = p.user_id
+      where p.challenge_id = ${challengeId}
+      group by p.user_id, u.time_zone
+    )
+    select u.id as user_id, u.first_name, u.photo_url,
+      s.completed_days, s.streak
+    from scored s join users u on u.id = s.user_id
+    order by s.completed_days desc, s.streak desc, u.first_name asc, u.id asc
+    limit ${pageSize} offset ${(page - 1) * pageSize}
+  `)
+  return result.rows.map((row) => ({
+    userId: row.user_id,
+    firstName: row.first_name,
+    photoUrl: row.photo_url,
+    completedDays: Number(row.completed_days),
+    streak: Number(row.streak),
+  }))
 }
 
 export async function createChallengeRecord(
@@ -27,6 +91,9 @@ export async function createChallengeRecord(
         description: input.description || null,
         emoji: input.emoji,
         type: input.type,
+        isPrivate: input.type === 'group' && input.isPrivate,
+        inviteToken:
+          input.type === 'group' && input.isPrivate ? randomBytes(8).toString('hex') : null,
         durationDays: input.durationDays,
         startDate: input.startDate,
         timeZone,
@@ -46,6 +113,65 @@ export async function createChallengeRecord(
   })
 }
 
+export async function editChallengeRecord(
+  db: Database,
+  challengeId: string,
+  ownerId: string,
+  input: EditChallengeInput,
+): Promise<boolean> {
+  const updated = await db
+    .update(challenges)
+    .set({
+      title: input.title,
+      description: input.description || null,
+      emoji: input.emoji,
+    })
+    .where(and(eq(challenges.id, challengeId), eq(challenges.ownerId, ownerId)))
+    .returning({ id: challenges.id })
+  return updated.length > 0
+}
+
+export async function removeAndBanParticipant(
+  db: Database,
+  challengeId: string,
+  userId: string,
+): Promise<void> {
+  await db.transaction(async (transaction) => {
+    await transaction
+      .select({ id: challenges.id })
+      .from(challenges)
+      .where(eq(challenges.id, challengeId))
+      .for('update')
+    await transaction.insert(challengeBans).values({ challengeId, userId }).onConflictDoNothing()
+    await transaction
+      .delete(challengeParticipants)
+      .where(
+        and(
+          eq(challengeParticipants.challengeId, challengeId),
+          eq(challengeParticipants.userId, userId),
+        ),
+      )
+  })
+}
+
+export async function findBannedUsers(
+  db: Database,
+  challengeId: string,
+): Promise<Array<{ id: string; firstName: string }>> {
+  return db
+    .select({ id: users.id, firstName: users.firstName })
+    .from(challengeBans)
+    .innerJoin(users, eq(users.id, challengeBans.userId))
+    .where(eq(challengeBans.challengeId, challengeId))
+    .orderBy(asc(challengeBans.createdAt))
+}
+
+export async function unbanUser(db: Database, challengeId: string, userId: string): Promise<void> {
+  await db
+    .delete(challengeBans)
+    .where(and(eq(challengeBans.challengeId, challengeId), eq(challengeBans.userId, userId)))
+}
+
 export async function findChallengesForUser(
   db: Database,
   userId: string,
@@ -57,6 +183,23 @@ export async function findChallengesForUser(
     .where(eq(challengeParticipants.userId, userId))
     .orderBy(desc(challenges.createdAt))
 
+  return rows.map((row) => row.challenge)
+}
+
+export async function findChallengesForUserPage(
+  db: Database,
+  userId: string,
+  page: number,
+  pageSize: number,
+): Promise<ChallengeRecord[]> {
+  const rows = await db
+    .select({ challenge: challenges })
+    .from(challengeParticipants)
+    .innerJoin(challenges, eq(challenges.id, challengeParticipants.challengeId))
+    .where(eq(challengeParticipants.userId, userId))
+    .orderBy(desc(challenges.createdAt), desc(challenges.id))
+    .limit(pageSize + 1)
+    .offset((page - 1) * pageSize)
   return rows.map((row) => row.challenge)
 }
 
@@ -80,7 +223,13 @@ export async function finishChallengeRecord(
   const updated = await db
     .update(challenges)
     .set({ finishedAt: new Date() })
-    .where(and(eq(challenges.id, challengeId), eq(challenges.ownerId, ownerId)))
+    .where(
+      and(
+        eq(challenges.id, challengeId),
+        eq(challenges.ownerId, ownerId),
+        isNull(challenges.finishedAt),
+      ),
+    )
     .returning({ id: challenges.id })
   return updated.length > 0
 }
@@ -115,6 +264,24 @@ export async function countParticipants(db: Database, challengeId: string): Prom
     .from(challengeParticipants)
     .where(eq(challengeParticipants.challengeId, challengeId))
   return result?.count ?? 0
+}
+
+export async function isUserParticipant(
+  db: Database,
+  challengeId: string,
+  userId: string,
+): Promise<boolean> {
+  const [row] = await db
+    .select({ id: challengeParticipants.id })
+    .from(challengeParticipants)
+    .where(
+      and(
+        eq(challengeParticipants.challengeId, challengeId),
+        eq(challengeParticipants.userId, userId),
+      ),
+    )
+    .limit(1)
+  return Boolean(row)
 }
 
 export async function countParticipantsForChallenges(
@@ -158,72 +325,177 @@ export async function findUserCheckInsForChallenges(
     .orderBy(desc(checkIns.date))
 }
 
-export async function findChallengeCheckIns(
-  db: Database,
-  challengeId: string,
-): Promise<CheckInRecord[]> {
-  return db
-    .select()
-    .from(checkIns)
-    .where(eq(checkIns.challengeId, challengeId))
-    .orderBy(desc(checkIns.date))
-}
-
-export async function insertCheckIn(
+export async function insertCheckInIfActive(
   db: Database,
   challengeId: string,
   userId: string,
   date: string,
-): Promise<void> {
-  await db.insert(checkIns).values({ challengeId, userId, date })
+): Promise<'created' | 'missing' | 'inactive' | 'not-participant' | 'duplicate'> {
+  return db.transaction(async (transaction) => {
+    const [challenge] = await transaction
+      .select()
+      .from(challenges)
+      .where(eq(challenges.id, challengeId))
+      .for('update')
+    if (!challenge) return 'missing'
+    if (
+      getChallengePhase(
+        challenge.startDate,
+        challenge.durationDays,
+        getDateInTimeZone(challenge.timeZone),
+        challenge.finishedAt,
+      ) !== 'active'
+    )
+      return 'inactive'
+    const [participant] = await transaction
+      .select({ id: challengeParticipants.id })
+      .from(challengeParticipants)
+      .where(
+        and(
+          eq(challengeParticipants.challengeId, challengeId),
+          eq(challengeParticipants.userId, userId),
+        ),
+      )
+      .for('update')
+    if (!participant) return 'not-participant'
+    const [created] = await transaction
+      .insert(checkIns)
+      .values({ challengeId, userId, date })
+      .onConflictDoNothing()
+      .returning({ id: checkIns.id })
+    return created ? 'created' : 'duplicate'
+  })
 }
 
-export async function removeCheckIn(
+export async function addParticipantIfActive(
+  db: Database,
+  challengeId: string,
+  userId: string,
+  inviteToken?: string,
+): Promise<
+  'joined' | 'already' | 'missing' | 'not-group' | 'inactive' | 'banned' | 'invite-required'
+> {
+  return db.transaction(async (transaction) => {
+    const [challenge] = await transaction
+      .select()
+      .from(challenges)
+      .where(eq(challenges.id, challengeId))
+      .for('update')
+    if (!challenge) return 'missing'
+    if (challenge.type !== 'group') return 'not-group'
+    if (
+      getChallengePhase(
+        challenge.startDate,
+        challenge.durationDays,
+        getDateInTimeZone(challenge.timeZone),
+        challenge.finishedAt,
+      ) === 'completed'
+    )
+      return 'inactive'
+    const [ban] = await transaction
+      .select({ userId: challengeBans.userId })
+      .from(challengeBans)
+      .where(and(eq(challengeBans.challengeId, challengeId), eq(challengeBans.userId, userId)))
+      .limit(1)
+    if (ban) return 'banned'
+    const [participant] = await transaction
+      .select({ id: challengeParticipants.id })
+      .from(challengeParticipants)
+      .where(
+        and(
+          eq(challengeParticipants.challengeId, challengeId),
+          eq(challengeParticipants.userId, userId),
+        ),
+      )
+      .limit(1)
+    if (participant) return 'already'
+    if (challenge.isPrivate && challenge.inviteToken !== inviteToken) return 'invite-required'
+    const [created] = await transaction
+      .insert(challengeParticipants)
+      .values({ challengeId, userId })
+      .onConflictDoNothing()
+      .returning({ id: challengeParticipants.id })
+    return created ? 'joined' : 'already'
+  })
+}
+
+export async function removeTodayCheckInIfActive(
   db: Database,
   challengeId: string,
   userId: string,
   date: string,
-): Promise<boolean> {
-  const deleted = await db
-    .delete(checkIns)
-    .where(
-      and(
-        eq(checkIns.challengeId, challengeId),
-        eq(checkIns.userId, userId),
-        eq(checkIns.date, date),
-      ),
+): Promise<'removed' | 'missing' | 'inactive' | 'not-participant' | 'not-found'> {
+  return db.transaction(async (transaction) => {
+    const [challenge] = await transaction
+      .select()
+      .from(challenges)
+      .where(eq(challenges.id, challengeId))
+      .for('update')
+    if (!challenge) return 'missing'
+    if (
+      getChallengePhase(
+        challenge.startDate,
+        challenge.durationDays,
+        getDateInTimeZone(challenge.timeZone),
+        challenge.finishedAt,
+      ) !== 'active'
     )
-    .returning({ id: checkIns.id })
-  return deleted.length > 0
+      return 'inactive'
+    const [participant] = await transaction
+      .select({ id: challengeParticipants.id })
+      .from(challengeParticipants)
+      .where(
+        and(
+          eq(challengeParticipants.challengeId, challengeId),
+          eq(challengeParticipants.userId, userId),
+        ),
+      )
+      .for('update')
+    if (!participant) return 'not-participant'
+    const deleted = await transaction
+      .delete(checkIns)
+      .where(
+        and(
+          eq(checkIns.challengeId, challengeId),
+          eq(checkIns.userId, userId),
+          eq(checkIns.date, date),
+        ),
+      )
+      .returning({ id: checkIns.id })
+    return deleted.length ? 'removed' : 'not-found'
+  })
 }
 
-export async function addParticipant(
+export async function removeParticipantIfActive(
   db: Database,
   challengeId: string,
   userId: string,
-): Promise<boolean> {
-  const inserted = await db
-    .insert(challengeParticipants)
-    .values({ challengeId, userId })
-    .onConflictDoNothing()
-    .returning({ id: challengeParticipants.id })
-  return inserted.length > 0
-}
-
-export async function removeParticipantAndCheckIns(
-  db: Database,
-  challengeId: string,
-  userId: string,
-): Promise<boolean> {
-  const deletedParticipants = await db
-    .delete(challengeParticipants)
-    .where(
-      and(
-        eq(challengeParticipants.challengeId, challengeId),
-        eq(challengeParticipants.userId, userId),
-      ),
+): Promise<'removed' | 'missing' | 'inactive' | 'not-participant'> {
+  return db.transaction(async (transaction) => {
+    const [challenge] = await transaction
+      .select()
+      .from(challenges)
+      .where(eq(challenges.id, challengeId))
+      .for('update')
+    if (!challenge) return 'missing'
+    if (
+      getChallengePhase(
+        challenge.startDate,
+        challenge.durationDays,
+        getDateInTimeZone(challenge.timeZone),
+        challenge.finishedAt,
+      ) === 'completed'
     )
-    .returning({ id: challengeParticipants.id })
-
-  return deletedParticipants.length > 0
+      return 'inactive'
+    const deleted = await transaction
+      .delete(challengeParticipants)
+      .where(
+        and(
+          eq(challengeParticipants.challengeId, challengeId),
+          eq(challengeParticipants.userId, userId),
+        ),
+      )
+      .returning({ id: challengeParticipants.id })
+    return deleted.length ? 'removed' : 'not-participant'
+  })
 }

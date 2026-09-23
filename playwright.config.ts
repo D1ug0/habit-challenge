@@ -23,6 +23,7 @@ export default defineConfig({
       TELEGRAM_BOT_TOKEN: 'habit-challenge-e2e-bot-token',
       AUTH_SESSION_SECRET: 'habit-challenge-e2e-session-secret-32-characters',
       NUXT_PUBLIC_DEMO_MODE: 'true',
+      NUXT_PUBLIC_TELEGRAM_BOT_USERNAME: 'habit_e2e_bot',
     },
   },
   projects: [

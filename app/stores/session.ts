@@ -3,7 +3,7 @@ import type { AuthResponse, UserDto } from '#shared/types/api'
 import { getApiErrorMessage } from '~/shared/api/error'
 import { expand, getInitData, getUserTimeZone, ready } from '~/shared/telegram'
 
-type SessionStatus = 'idle' | 'loading' | 'ready' | 'error'
+type SessionStatus = 'idle' | 'loading' | 'ready' | 'error' | 'signed-out'
 
 export const useSessionStore = defineStore('session', () => {
   const user = ref<UserDto | null>(null)
@@ -36,5 +36,22 @@ export const useSessionStore = defineStore('session', () => {
     }
   }
 
-  return { user, mode, status, error, initialize }
+  function setUser(updated: UserDto): void {
+    user.value = updated
+  }
+
+  async function logout(): Promise<void> {
+    await $fetch('/api/auth/logout', { method: 'POST' })
+    user.value = null
+    mode.value = null
+    status.value = 'signed-out'
+  }
+
+  function afterAccountDeletion(): void {
+    user.value = null
+    mode.value = null
+    status.value = 'signed-out'
+  }
+
+  return { user, mode, status, error, initialize, setUser, logout, afterAccountDeletion }
 })

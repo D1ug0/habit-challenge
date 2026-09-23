@@ -9,6 +9,7 @@ import { impactFeedback } from '~/shared/telegram'
 
 const props = defineProps<{
   challengeId: string
+  inviteToken?: string
 }>()
 
 const session = useSessionStore()
@@ -22,7 +23,10 @@ async function load(): Promise<void> {
   loading.value = true
   error.value = null
   try {
-    const response = await $fetch<ChallengeDetailsResponse>(`/api/challenges/${props.challengeId}`)
+    const response = await $fetch<ChallengeDetailsResponse>(
+      `/api/challenges/${props.challengeId}`,
+      { query: props.inviteToken ? { inviteToken: props.inviteToken } : {} },
+    )
     challenge.value = response.challenge
   } catch (requestError: unknown) {
     error.value = getApiErrorMessage(requestError)
@@ -39,7 +43,7 @@ async function join(): Promise<void> {
       `/api/challenges/${props.challengeId}/join`,
       {
         method: 'POST',
-        body: {},
+        body: props.inviteToken ? { inviteToken: props.inviteToken } : {},
       },
     )
     challenge.value = response.challenge

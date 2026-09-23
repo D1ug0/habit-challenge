@@ -19,8 +19,25 @@ export const createChallengeSchema = z.object({
   description: z.string().trim().max(500, 'Максимум 500 символов').optional().default(''),
   emoji: z.string().trim().min(1, 'Выберите emoji').max(12, 'Слишком длинное значение'),
   type: z.enum(['personal', 'group']),
+  isPrivate: z.boolean().default(false),
   durationDays: z.union([z.literal(7), z.literal(14), z.literal(30)]),
   startDate: z.string().refine(isCalendarDate, 'Некорректная дата'),
+})
+
+export const editChallengeSchema = createChallengeSchema.pick({
+  title: true,
+  description: true,
+  emoji: true,
+})
+
+export const profileSettingsSchema = z.object({
+  timeZone: z.string().trim().max(64).refine(isValidTimeZone, 'Некорректный часовой пояс'),
+  reminderEnabled: z.boolean(),
+  reminderHour: z.number().int().min(0).max(23),
+})
+
+export const listQuerySchema = z.object({
+  page: z.coerce.number().int().min(1).max(10_000).default(1),
 })
 
 export const telegramAuthSchema = z.object({
@@ -29,5 +46,12 @@ export const telegramAuthSchema = z.object({
 })
 
 export const emptyMutationSchema = z.object({}).strict()
+export const inviteTokenSchema = z
+  .string()
+  .regex(/^[a-f0-9]{16}$/)
+  .optional()
+export const joinChallengeSchema = z.object({ inviteToken: inviteTokenSchema }).strict()
 
 export type CreateChallengeInput = z.infer<typeof createChallengeSchema>
+export type EditChallengeInput = z.infer<typeof editChallengeSchema>
+export type ProfileSettingsInput = z.infer<typeof profileSettingsSchema>

@@ -4,7 +4,7 @@ import type {
   LeaderboardEntry,
   UserDto,
 } from '#shared/types/api'
-import type { CreateChallengeInput } from '#shared/schemas/challenge'
+import type { CreateChallengeInput, EditChallengeInput } from '#shared/schemas/challenge'
 import {
   calculateProgress,
   calculateStreak,
@@ -16,37 +16,35 @@ import {
 } from '#shared/domain/challenge'
 import { getDateInTimeZone } from '#shared/domain/time'
 import {
-  canJoinChallenge,
-  canLeaveChallenge,
   canManageChallenge,
   canPreviewChallenge,
   canViewChallenge,
 } from '#shared/domain/permissions'
 import type { Database } from '../database'
 import {
-  addParticipant,
+  addParticipantIfActive,
   countParticipants,
   countParticipantsForChallenges,
   createChallengeRecord,
+  editChallengeRecord,
   deleteChallengeRecord,
   findChallengeById,
-  findChallengeCheckIns,
-  findChallengesForUser,
+  findBannedUsers,
+  findLeaderboardPage,
+  findChallengesForUserPage,
   findParticipants,
   findUserCheckIns,
   findUserCheckInsForChallenges,
   finishChallengeRecord,
-  insertCheckIn,
-  removeCheckIn,
-  removeParticipantAndCheckIns,
+  insertCheckInIfActive,
+  isUserParticipant,
+  removeTodayCheckInIfActive,
+  removeParticipantIfActive,
+  removeAndBanParticipant,
+  unbanUser,
 } from '../repositories/challenge-repository'
-import type {
-  ChallengeRecord,
-  CheckInRecord,
-  ParticipantWithUser,
-} from '../repositories/challenge-repository'
-import { toParticipantUserDto } from '../repositories/user-repository'
-import { apiError, isUniqueViolation } from '../utils/api-error'
+import type { ChallengeRecord, CheckInRecord } from '../repositories/challenge-repository'
+import { apiError } from '../utils/api-error'
 
 function toCheckInDto(checkIn: CheckInRecord) {
   return {
@@ -76,6 +74,7 @@ function makeSummary(
     startDate: challenge.startDate,
     endDate: getChallengeEndDate(challenge.startDate, challenge.durationDays),
     timeZone: challenge.timeZone,
+    isPrivate: challenge.isPrivate,
     finishedAt: challenge.finishedAt?.toISOString() ?? null,
     createdAt: challenge.createdAt.toISOString(),
     progress: calculateProgress(checkInDates, challenge.durationDays),
@@ -117,43 +116,48 @@ async function toSummary(
 async function makeLeaderboard(
   db: Database,
   challengeId: string,
-  participants: ParticipantWithUser[],
   currentUserId: string,
-  now: Date,
+  page = 1,
 ): Promise<LeaderboardEntry[]> {
-  const challengeCheckIns = await findChallengeCheckIns(db, challengeId)
-  const datesByUser = new Map<string, string[]>()
-  for (const checkIn of challengeCheckIns) {
-    const dates = datesByUser.get(checkIn.userId) ?? []
-    dates.push(checkIn.date)
-    datesByUser.set(checkIn.userId, dates)
-  }
+  const pageSize = 20
+  const rows = await findLeaderboardPage(db, challengeId, page, pageSize)
+  return rows.map((row, index) => ({
+    user: { id: row.userId, firstName: row.firstName, photoUrl: row.photoUrl },
+    completedDays: row.completedDays,
+    streak: row.streak,
+    isCurrentUser: row.userId === currentUserId,
+    rank: (page - 1) * pageSize + index + 1,
+  }))
+}
 
-  const rows = participants.map(({ user }) => {
-    const dates = datesByUser.get(user.id) ?? []
-    return {
-      user: toParticipantUserDto(user),
-      completedDays: new Set(dates).size,
-      streak: calculateStreak(dates, getDateInTimeZone(user.timeZone, now)),
-      isCurrentUser: user.id === currentUserId,
-    }
-  })
-
-  return rows
-    .sort(
-      (left, right) =>
-        right.completedDays - left.completedDays ||
-        right.streak - left.streak ||
-        left.user.firstName.localeCompare(right.user.firstName),
-    )
-    .map((entry, index) => ({ ...entry, rank: index + 1 }))
+export async function getLeaderboardPage(
+  db: Database,
+  challengeId: string,
+  currentUser: UserDto,
+  page: number,
+): Promise<{ participants: LeaderboardEntry[]; hasMore: boolean }> {
+  const challenge = await findChallengeById(db, challengeId)
+  if (!challenge) apiError(404, 'CHALLENGE_NOT_FOUND', 'Челлендж не найден')
+  const [isParticipant, count] = await Promise.all([
+    isUserParticipant(db, challengeId, currentUser.id),
+    countParticipants(db, challengeId),
+  ])
+  if (!isParticipant && challenge.ownerId !== currentUser.id)
+    apiError(403, 'NOT_A_PARTICIPANT', 'Сначала присоединитесь к челленджу')
+  const rows =
+    challenge.type === 'group' ? await makeLeaderboard(db, challengeId, currentUser.id, page) : []
+  return { participants: rows, hasMore: count > page * 20 }
 }
 
 export async function listChallenges(
   db: Database,
   currentUser: UserDto,
-): Promise<ChallengeSummary[]> {
-  const records = await findChallengesForUser(db, currentUser.id)
+  page = 1,
+): Promise<{ challenges: ChallengeSummary[]; page: number; hasMore: boolean }> {
+  const pageSize = 20
+  const recordsWithExtra = await findChallengesForUserPage(db, currentUser.id, page, pageSize)
+  const hasMore = recordsWithExtra.length > pageSize
+  const records = recordsWithExtra.slice(0, pageSize)
   const challengeIds = records.map((challenge) => challenge.id)
   const [checkIns, participantCounts] = await Promise.all([
     findUserCheckInsForChallenges(db, challengeIds, currentUser.id),
@@ -168,7 +172,7 @@ export async function listChallenges(
 
   const now = new Date()
   const userToday = getDateInTimeZone(currentUser.timeZone, now)
-  return records.map((challenge) =>
+  const summaries = records.map((challenge) =>
     makeSummary(
       challenge,
       checkInsByChallenge.get(challenge.id) ?? [],
@@ -177,6 +181,7 @@ export async function listChallenges(
       getDateInTimeZone(challenge.timeZone, now),
     ),
   )
+  return { challenges: summaries, page, hasMore }
 }
 
 export async function createChallenge(
@@ -200,15 +205,21 @@ export async function getChallengeDetails(
   challengeId: string,
   currentUser: UserDto,
   botUsername: string,
+  inviteToken?: string,
 ): Promise<ChallengeDetails> {
   const challenge = await findChallengeById(db, challengeId)
   if (!challenge) {
     apiError(404, 'CHALLENGE_NOT_FOUND', 'Челлендж не найден')
   }
 
-  const participants = await findParticipants(db, challengeId)
-  const participantIds = participants.map((row) => row.user.id)
-  if (!canPreviewChallenge(currentUser.id, challenge, participantIds)) {
+  const member = await isUserParticipant(db, challengeId, currentUser.id)
+  const participantIds = member ? [currentUser.id] : []
+  if (
+    !canPreviewChallenge(currentUser.id, challenge, participantIds) ||
+    (challenge.isPrivate &&
+      !canViewChallenge(currentUser.id, challenge, participantIds) &&
+      inviteToken !== challenge.inviteToken)
+  ) {
     apiError(403, 'CHALLENGE_ACCESS_DENIED', 'У вас нет доступа к этому челленджу')
   }
 
@@ -218,7 +229,7 @@ export async function getChallengeDetails(
   const checkIns = isParticipant ? await findUserCheckIns(db, challengeId, currentUser.id) : []
   const leaderboard =
     challenge.type === 'group' && isParticipant
-      ? await makeLeaderboard(db, challengeId, participants, currentUser.id, now)
+      ? await makeLeaderboard(db, challengeId, currentUser.id)
       : []
 
   return {
@@ -227,9 +238,11 @@ export async function getChallengeDetails(
     isParticipant,
     checkIns: checkIns.map(toCheckInDto),
     leaderboard,
+    leaderboardHasMore:
+      challenge.type === 'group' && isParticipant && summary.participantsCount > 20,
     inviteUrl:
       challenge.type === 'group' && isParticipant && summary.phase !== 'completed' && botUsername
-        ? `https://t.me/${botUsername}?startapp=challenge_${challenge.id}`
+        ? `https://t.me/${botUsername}?startapp=challenge_${challenge.id}${challenge.isPrivate ? `_${challenge.inviteToken}` : ''}`
         : null,
   }
 }
@@ -240,49 +253,18 @@ export async function checkInToday(
   currentUser: UserDto,
   botUsername: string,
 ): Promise<ChallengeDetails> {
-  const challenge = await findChallengeById(db, challengeId)
-  if (!challenge) {
-    apiError(404, 'CHALLENGE_NOT_FOUND', 'Челлендж не найден')
-  }
-
-  const participants = await findParticipants(db, challengeId)
-  const participantIds = participants.map((row) => row.user.id)
-  if (!canViewChallenge(currentUser.id, challenge, participantIds)) {
-    apiError(403, 'NOT_A_PARTICIPANT', 'Сначала присоединитесь к челленджу')
-  }
-
-  const now = new Date()
-  const challengeToday = getDateInTimeZone(challenge.timeZone, now)
-  const userToday = getDateInTimeZone(currentUser.timeZone, now)
-  if (
-    getChallengePhase(
-      challenge.startDate,
-      challenge.durationDays,
-      challengeToday,
-      challenge.finishedAt,
-    ) !== 'active'
-  ) {
+  const status = await insertCheckInIfActive(
+    db,
+    challengeId,
+    currentUser.id,
+    getDateInTimeZone(currentUser.timeZone),
+  )
+  if (status === 'missing') apiError(404, 'CHALLENGE_NOT_FOUND', 'Челлендж не найден')
+  if (status === 'inactive')
     apiError(409, 'CHALLENGE_NOT_ACTIVE', 'Сегодня этот челлендж не активен')
-  }
-
-  const checkIns = await findUserCheckIns(db, challengeId, currentUser.id)
-  if (
-    hasDailyCheckIn(
-      checkIns.map((checkIn) => checkIn.date),
-      userToday,
-    )
-  ) {
-    apiError(409, 'ALREADY_CHECKED_IN', 'Сегодня уже отмечено')
-  }
-
-  try {
-    await insertCheckIn(db, challengeId, currentUser.id, userToday)
-  } catch (error: unknown) {
-    if (isUniqueViolation(error)) {
-      apiError(409, 'ALREADY_CHECKED_IN', 'Сегодня уже отмечено')
-    }
-    throw error
-  }
+  if (status === 'not-participant')
+    apiError(403, 'NOT_A_PARTICIPANT', 'Сначала присоединитесь к челленджу')
+  if (status === 'duplicate') apiError(409, 'ALREADY_CHECKED_IN', 'Сегодня уже отмечено')
 
   return getChallengeDetails(db, challengeId, currentUser, botUsername)
 }
@@ -293,42 +275,18 @@ export async function undoTodayCheckIn(
   currentUser: UserDto,
   botUsername: string,
 ): Promise<ChallengeDetails> {
-  const challenge = await findChallengeById(db, challengeId)
-  if (!challenge) {
-    apiError(404, 'CHALLENGE_NOT_FOUND', 'Челлендж не найден')
-  }
-
-  const participants = await findParticipants(db, challengeId)
-  if (
-    !canViewChallenge(
-      currentUser.id,
-      challenge,
-      participants.map((row) => row.user.id),
-    )
-  ) {
-    apiError(403, 'NOT_A_PARTICIPANT', 'У вас нет доступа к этому челленджу')
-  }
-
-  if (
-    getChallengePhase(
-      challenge.startDate,
-      challenge.durationDays,
-      getDateInTimeZone(challenge.timeZone),
-      challenge.finishedAt,
-    ) !== 'active'
-  ) {
-    apiError(409, 'CHALLENGE_NOT_ACTIVE', 'Этот челлендж уже завершён или ещё не начался')
-  }
-
-  const removed = await removeCheckIn(
+  const status = await removeTodayCheckInIfActive(
     db,
     challengeId,
     currentUser.id,
     getDateInTimeZone(currentUser.timeZone),
   )
-  if (!removed) {
-    apiError(404, 'CHECK_IN_NOT_FOUND', 'Сегодняшняя отметка не найдена')
-  }
+  if (status === 'missing') apiError(404, 'CHALLENGE_NOT_FOUND', 'Челлендж не найден')
+  if (status === 'inactive')
+    apiError(409, 'CHALLENGE_NOT_ACTIVE', 'Этот челлендж уже завершён или ещё не начался')
+  if (status === 'not-participant')
+    apiError(403, 'NOT_A_PARTICIPANT', 'У вас нет доступа к этому челленджу')
+  if (status === 'not-found') apiError(404, 'CHECK_IN_NOT_FOUND', 'Сегодняшняя отметка не найдена')
 
   return getChallengeDetails(db, challengeId, currentUser, botUsername)
 }
@@ -338,37 +296,80 @@ export async function joinChallenge(
   challengeId: string,
   currentUser: UserDto,
   botUsername: string,
+  inviteToken?: string,
 ): Promise<{ challenge: ChallengeDetails; joined: boolean }> {
-  const challenge = await findChallengeById(db, challengeId)
-  if (!challenge) {
-    apiError(404, 'CHALLENGE_NOT_FOUND', 'Челлендж не найден')
-  }
-
-  const participants = await findParticipants(db, challengeId)
-  const participantIds = participants.map((row) => row.user.id)
-  if (challenge.type !== 'group') {
+  const status = await addParticipantIfActive(db, challengeId, currentUser.id, inviteToken)
+  if (status === 'missing') apiError(404, 'CHALLENGE_NOT_FOUND', 'Челлендж не найден')
+  if (status === 'not-group')
     apiError(403, 'PERSONAL_CHALLENGE', 'К личному челленджу нельзя присоединиться')
-  }
-
-  if (
-    getChallengePhase(
-      challenge.startDate,
-      challenge.durationDays,
-      getDateInTimeZone(challenge.timeZone),
-      challenge.finishedAt,
-    ) === 'completed'
-  ) {
-    apiError(409, 'CHALLENGE_COMPLETED', 'Этот челлендж уже завершён')
-  }
-
-  const joined = canJoinChallenge(currentUser.id, challenge, participantIds)
-    ? await addParticipant(db, challengeId, currentUser.id)
-    : false
+  if (status === 'inactive') apiError(409, 'CHALLENGE_COMPLETED', 'Этот челлендж уже завершён')
+  if (status === 'banned')
+    apiError(403, 'CHALLENGE_BANNED', 'Создатель ограничил участие в этом челлендже')
+  if (status === 'invite-required')
+    apiError(403, 'INVITE_REQUIRED', 'Для вступления нужна ссылка-приглашение')
 
   return {
     challenge: await getChallengeDetails(db, challengeId, currentUser, botUsername),
-    joined,
+    joined: status === 'joined',
   }
+}
+
+export async function editChallenge(
+  db: Database,
+  challengeId: string,
+  currentUser: UserDto,
+  input: EditChallengeInput,
+  botUsername: string,
+): Promise<ChallengeDetails> {
+  const challenge = await findChallengeById(db, challengeId)
+  if (!challenge) apiError(404, 'CHALLENGE_NOT_FOUND', 'Челлендж не найден')
+  if (!canManageChallenge(currentUser.id, challenge))
+    apiError(403, 'CHALLENGE_ACCESS_DENIED', 'Изменять челлендж может только создатель')
+  await editChallengeRecord(db, challengeId, currentUser.id, input)
+  return getChallengeDetails(db, challengeId, currentUser, botUsername)
+}
+
+export async function banParticipant(
+  db: Database,
+  challengeId: string,
+  participantId: string,
+  currentUser: UserDto,
+): Promise<void> {
+  const challenge = await findChallengeById(db, challengeId)
+  if (!challenge) apiError(404, 'CHALLENGE_NOT_FOUND', 'Челлендж не найден')
+  if (!canManageChallenge(currentUser.id, challenge) || challenge.type !== 'group')
+    apiError(403, 'CHALLENGE_ACCESS_DENIED', 'Управлять участниками может только создатель группы')
+  if (participantId === currentUser.id)
+    apiError(403, 'OWNER_CANNOT_LEAVE', 'Создателя исключить нельзя')
+  const participants = await findParticipants(db, challengeId)
+  if (!participants.some(({ user }) => user.id === participantId))
+    apiError(404, 'PARTICIPANT_NOT_FOUND', 'Участник не найден')
+  await removeAndBanParticipant(db, challengeId, participantId)
+}
+
+export async function listBans(
+  db: Database,
+  challengeId: string,
+  currentUser: UserDto,
+): Promise<Array<{ id: string; firstName: string }>> {
+  const challenge = await findChallengeById(db, challengeId)
+  if (!challenge) apiError(404, 'CHALLENGE_NOT_FOUND', 'Челлендж не найден')
+  if (!canManageChallenge(currentUser.id, challenge))
+    apiError(403, 'CHALLENGE_ACCESS_DENIED', 'Нет доступа')
+  return findBannedUsers(db, challengeId)
+}
+
+export async function liftBan(
+  db: Database,
+  challengeId: string,
+  userId: string,
+  currentUser: UserDto,
+): Promise<void> {
+  const challenge = await findChallengeById(db, challengeId)
+  if (!challenge) apiError(404, 'CHALLENGE_NOT_FOUND', 'Челлендж не найден')
+  if (!canManageChallenge(currentUser.id, challenge))
+    apiError(403, 'CHALLENGE_ACCESS_DENIED', 'Нет доступа')
+  await unbanUser(db, challengeId, userId)
 }
 
 export async function leaveChallenge(
@@ -381,16 +382,13 @@ export async function leaveChallenge(
     apiError(404, 'CHALLENGE_NOT_FOUND', 'Челлендж не найден')
   }
 
-  const participants = await findParticipants(db, challengeId)
-  const participantIds = participants.map((row) => row.user.id)
-
   if (challenge.type !== 'group') {
     apiError(403, 'PERSONAL_CHALLENGE', 'Из личного челленджа нельзя выйти')
   }
   if (challenge.ownerId === currentUser.id) {
     apiError(403, 'OWNER_CANNOT_LEAVE', 'Создатель не может покинуть свой челлендж')
   }
-  if (!canLeaveChallenge(currentUser.id, challenge, participantIds)) {
+  if (!(await isUserParticipant(db, challengeId, currentUser.id))) {
     apiError(403, 'NOT_A_PARTICIPANT', 'Вы не участвуете в этом челлендже')
   }
   if (
@@ -404,8 +402,11 @@ export async function leaveChallenge(
     apiError(409, 'CHALLENGE_COMPLETED', 'Завершённый челлендж нельзя покинуть')
   }
 
-  const removed = await removeParticipantAndCheckIns(db, challengeId, currentUser.id)
-  if (!removed) {
+  const status = await removeParticipantIfActive(db, challengeId, currentUser.id)
+  if (status === 'inactive')
+    apiError(409, 'CHALLENGE_COMPLETED', 'Завершённый челлендж нельзя покинуть')
+  if (status === 'missing') apiError(404, 'CHALLENGE_NOT_FOUND', 'Челлендж не найден')
+  if (status === 'not-participant') {
     apiError(409, 'PARTICIPANT_ALREADY_LEFT', 'Вы уже покинули этот челлендж')
   }
 }
@@ -431,7 +432,9 @@ export async function finishChallenge(
   ) {
     apiError(409, 'CHALLENGE_COMPLETED', 'Этот челлендж уже завершён')
   }
-  await finishChallengeRecord(db, challengeId, currentUser.id)
+  if (!(await finishChallengeRecord(db, challengeId, currentUser.id))) {
+    apiError(409, 'CHALLENGE_COMPLETED', 'Этот челлендж уже завершён')
+  }
   return getChallengeDetails(db, challengeId, currentUser, botUsername)
 }
 

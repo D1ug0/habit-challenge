@@ -1,5 +1,5 @@
 import type { JoinChallengeResponse } from '#shared/types/api'
-import { emptyMutationSchema } from '#shared/schemas/challenge'
+import { joinChallengeSchema } from '#shared/schemas/challenge'
 import { getDatabase } from '../../../database'
 import { joinChallenge } from '../../../services/challenge-service'
 import { parseBody } from '../../../utils/api-error'
@@ -9,8 +9,17 @@ import { enforceMutationRateLimit } from '../../../utils/rate-limit'
 import { requireUser } from '../../../utils/session'
 
 export default defineEventHandler(async (event): Promise<JoinChallengeResponse> => {
-  const [user] = await Promise.all([requireUser(event), parseBody(event, emptyMutationSchema)])
-  enforceMutationRateLimit(event, user.id)
+  const [user, body] = await Promise.all([
+    requireUser(event),
+    parseBody(event, joinChallengeSchema),
+  ])
+  await enforceMutationRateLimit(event, user.id)
   const config = getServerConfig(event)
-  return joinChallenge(getDatabase(event), getChallengeId(event), user, config.telegramBotUsername)
+  return joinChallenge(
+    getDatabase(event),
+    getChallengeId(event),
+    user,
+    config.telegramBotUsername,
+    body.inviteToken,
+  )
 })

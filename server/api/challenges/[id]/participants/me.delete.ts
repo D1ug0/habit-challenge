@@ -7,7 +7,7 @@ import { requireUser } from '../../../../utils/session'
 
 export default defineEventHandler(async (event): Promise<LeaveChallengeResponse> => {
   const user = await requireUser(event)
-  enforceMutationRateLimit(event, user.id)
+  await enforceMutationRateLimit(event, user.id)
   await leaveChallenge(getDatabase(event), getChallengeId(event), user)
   return { left: true }
 })

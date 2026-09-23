@@ -54,6 +54,8 @@ export default defineNuxtConfig({
     telegramBotToken: process.env.TELEGRAM_BOT_TOKEN ?? '',
     authSessionSecret: process.env.AUTH_SESSION_SECRET ?? '',
     authMaxAgeSeconds: process.env.AUTH_MAX_AGE_SECONDS ?? '86400',
+    reminderJobSecret: process.env.REMINDER_JOB_SECRET ?? '',
+    monitoringToken: process.env.MONITORING_TOKEN ?? '',
     public: {
       demoMode:
         process.env.NUXT_PUBLIC_DEMO_MODE ??

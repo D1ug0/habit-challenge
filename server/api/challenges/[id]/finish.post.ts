@@ -10,7 +10,7 @@ import { requireUser } from '../../../utils/session'
 
 export default defineEventHandler(async (event): Promise<ChallengeDetailsResponse> => {
   const [user] = await Promise.all([requireUser(event), parseBody(event, emptyMutationSchema)])
-  enforceMutationRateLimit(event, user.id)
+  await enforceMutationRateLimit(event, user.id)
   return {
     challenge: await finishChallenge(
       getDatabase(event),

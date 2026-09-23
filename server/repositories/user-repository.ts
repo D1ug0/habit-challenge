@@ -1,7 +1,8 @@
 import { eq } from 'drizzle-orm'
 import type { ParticipantUserDto, UserDto } from '#shared/types/api'
 import type { Database } from '../database'
-import { users } from '../database/schema'
+import { challenges, users } from '../database/schema'
+import type { ProfileSettingsInput } from '#shared/schemas/challenge'
 import type { VerifiedTelegramUser } from '../utils/telegram-auth'
 
 export type UserRecord = typeof users.$inferSelect
@@ -16,6 +17,8 @@ export function toUserDto(user: UserRecord): UserDto {
     lastName: user.lastName,
     photoUrl: user.photoUrl,
     timeZone: user.timeZone,
+    reminderEnabled: user.reminderEnabled,
+    reminderHour: user.reminderHour,
     createdAt: user.createdAt.toISOString(),
   }
 }
@@ -42,7 +45,6 @@ export async function upsertTelegramUser(
         firstName: input.firstName,
         lastName: input.lastName,
         photoUrl: input.photoUrl,
-        timeZone: input.timeZone,
       },
     })
     .returning()
@@ -52,6 +54,23 @@ export async function upsertTelegramUser(
   }
 
   return user
+}
+
+export async function updateUserSettings(
+  db: Database,
+  id: string,
+  input: ProfileSettingsInput,
+): Promise<UserRecord> {
+  const [user] = await db.update(users).set(input).where(eq(users.id, id)).returning()
+  if (!user) throw new Error('Пользователь не найден')
+  return user
+}
+
+export async function deleteUserAccount(db: Database, id: string): Promise<void> {
+  await db.transaction(async (transaction) => {
+    await transaction.delete(challenges).where(eq(challenges.ownerId, id))
+    await transaction.delete(users).where(eq(users.id, id))
+  })
 }
 
 export async function findUserById(db: Database, id: string): Promise<UserRecord | null> {

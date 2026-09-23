@@ -27,7 +27,9 @@ const launchParamsSchema = z.object({
 
 const challengeStartParamSchema = z
   .string()
-  .regex(/^challenge_([0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})$/i)
+  .regex(
+    /^challenge_([0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})(?:_([a-f0-9]{16}))?$/i,
+  )
 
 function getWebApp(): TelegramWebApp | null {
   if (!import.meta.client) {
@@ -57,13 +59,15 @@ export function getUserTimeZone(): string {
   return isValidTimeZone(timeZone) ? timeZone : 'UTC'
 }
 
-export function getLaunchChallengeId(): string | null {
+export function getLaunchChallenge(): { id: string; inviteToken?: string } | null {
   const parsed = launchParamsSchema.safeParse(getWebApp()?.initDataUnsafe)
   const startParam = parsed.success ? parsed.data.start_param : undefined
   if (!startParam || !challengeStartParamSchema.safeParse(startParam).success) {
     return null
   }
-  return startParam.slice('challenge_'.length)
+  const [, id, inviteToken] =
+    startParam.match(/^challenge_([0-9a-f-]{36})(?:_([a-f0-9]{16}))?$/i) ?? []
+  return id ? { id, inviteToken } : null
 }
 
 export function impactFeedback(): void {

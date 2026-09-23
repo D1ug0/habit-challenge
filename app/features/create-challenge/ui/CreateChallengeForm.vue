@@ -13,6 +13,7 @@ const form = reactive<CreateChallengeInput>({
   description: '',
   emoji: '🌱',
   type: 'personal',
+  isPrivate: false,
   durationDays: 14,
   startDate: '',
 })
@@ -125,6 +126,11 @@ async function submit(): Promise<void> {
           </label>
         </div>
       </fieldset>
+
+      <label v-if="form.type === 'group'" class="field-label privacy-option">
+        <input v-model="form.isPrivate" type="checkbox" />
+        Закрытая группа: вступить можно только по приглашению
+      </label>
 
       <div class="two-columns">
         <div class="field">
@@ -259,6 +265,12 @@ fieldset {
 }
 .submit {
   width: 100%;
+}
+.privacy-option {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  line-height: 1.4;
 }
 @media (max-width: 480px) {
   .two-columns {
